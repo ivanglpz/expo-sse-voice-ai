@@ -1,0 +1,15 @@
+{
+  "platforms": [
+    "android"
+  ],
+  "apple": {
+    "modules": [
+      "ExpoSpeechToTextModule"
+    ]
+  },
+  "android": {
+    "modules": [
+      "expo.modules.speechtotext.ExpoSpeechToTextModule"
+    ]
+  }
+}

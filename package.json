@@ -1,0 +1,44 @@
+{
+  "name": "demo-expo-call-ai",
+  "version": "1.0.0",
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "APP_ENV=development expo start",
+    "android": "APP_ENV=development expo run:android",
+    "ios": "APP_ENV=development expo run:ios",
+    "web": "APP_ENV=development expo start --web",
+    "test": "jest --watchAll",
+    "build:dev:android": "APP_ENV=development eas build --platform android --profile development --local",
+    "build:dev:ios": "APP_ENV=development eas build --platform ios --profile development --local",
+    "build:preview:android": "APP_ENV=preview eas build --platform android --profile preview --local",
+    "build:preview:ios": "APP_ENV=preview eas build --platform ios --profile preview --local",
+    "build:prod:android": "APP_ENV=production eas build --platform android --profile production --local",
+    "build:prod:ios": "APP_ENV=production eas build --platform ios --profile production --local"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.90.19",
+    "axios": "^1.13.2",
+    "expo": "~54.0.31",
+    "expo-constants": "~18.0.13",
+    "expo-crypto": "~15.0.8",
+    "expo-linking": "~8.0.11",
+    "expo-router": "~6.0.22",
+    "expo-speech": "^14.0.8",
+    "expo-sqlite": "^16.0.10",
+    "expo-status-bar": "~3.0.9",
+    "jotai": "^2.16.2",
+    "jotai-tanstack-query": "^0.11.0",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "react-native-safe-area-context": "~5.6.2",
+    "react-native-screens": "~4.16.0",
+    "react-native-sse": "^1.2.1",
+    "react-native-svg": "^15.15.1",
+    "socket.io-client": "^4.8.3"
+  },
+  "devDependencies": {
+    "@types/react": "~19.1.0",
+    "typescript": "~5.9.2"
+  },
+  "private": true
+}
