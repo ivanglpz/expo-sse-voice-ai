@@ -39,7 +39,7 @@ export const useSSEStream = (options: UseSSEStreamOptions) => {
     clearStreamTimeout();
     setIsStreaming(false);
     onClose?.();
-  }, [clearStreamTimeout]);
+  }, []);
 
   const startStream = useCallback(
     (params?: SSEStreamParams) => {
