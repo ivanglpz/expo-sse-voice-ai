@@ -36,6 +36,8 @@ type Message = {
 
 export const DialogCall = ({ chatId, onClose }: DialogCallProps) => {
   const { scaleAnim, setMode } = usePulseAnimation();
+  const [muted, setMuted] = useState(false);
+
   const WS_URL = `${CONFIG.API_URL}?chatId=${chatId}`;
 
   const CREATE_MESSAGE = useSetAtom(CREATE_MESSAGE_ATOM);
@@ -90,10 +92,6 @@ export const DialogCall = ({ chatId, onClose }: DialogCallProps) => {
     },
   });
 
-  // ✅ Estado de mute
-  const [muted, setMuted] = useState(false);
-
-  // ✅ Función toggle mute
   const toggleMute = () => {
     const newMuted = !muted;
     setMuted(newMuted);
