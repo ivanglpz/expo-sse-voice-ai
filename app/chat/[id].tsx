@@ -1,7 +1,7 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
 import { atom, useAtomValue, useSetAtom } from "jotai";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import {
   Alert,
   FlatList,
@@ -52,27 +52,22 @@ const Index = () => {
   const flatListRef = useRef<FlatList<Message>>(null);
 
   const currentAIMessageId = useRef<string | null>(null);
-  const fullResponse = useRef("");
 
   const { isStreaming, startStream } = useSSEStream({
     url: `${CONFIG.API_URL}/chat`,
     onMessage: (data) => {
       if (data.content && currentAIMessageId.current) {
-        fullResponse.current += data.content;
-
         UPDATE_MESSAGE({
           sessionId: session.id,
           messageId: currentAIMessageId.current,
-          newText: fullResponse.current,
+          newText: data.content,
         });
 
-        setTimeout(() => {
-          flatListRef.current?.scrollToEnd({ animated: true });
-        }, 50);
+        flatListRef.current?.scrollToEnd({ animated: false });
       }
     },
     onError: (error) => {
-      if (!fullResponse.current && currentAIMessageId.current) {
+      if (currentAIMessageId.current) {
         DELETE_MESSAGE({
           chatId: session.id,
           messageId: currentAIMessageId.current,
@@ -81,7 +76,6 @@ const Index = () => {
       }
 
       currentAIMessageId.current = null;
-      fullResponse.current = "";
     },
     onOpen: () => {
       console.log("SSE Connection opened");
@@ -90,7 +84,6 @@ const Index = () => {
       console.log("SSE connection closed");
 
       currentAIMessageId.current = null;
-      fullResponse.current = "";
     },
     timeout: 3000,
   });
@@ -117,7 +110,6 @@ const Index = () => {
 
     const aiMessageId = UUID();
     currentAIMessageId.current = aiMessageId;
-    fullResponse.current = "";
 
     CREATE_MESSAGE({
       chatId: session.id,
@@ -155,12 +147,6 @@ const Index = () => {
     AudioStream.stopStreaming();
     setIsCalling(false);
   };
-
-  useEffect(() => {
-    if (flatListRef.current && !isStreaming) {
-      flatListRef.current.scrollToEnd({ animated: true });
-    }
-  }, [session.messages, isStreaming]);
 
   return (
     <SafeAreaView style={{ flex: 1 }}>
@@ -210,6 +196,9 @@ const Index = () => {
             ref={flatListRef}
             keyExtractor={(item) => item.id}
             contentContainerStyle={{ paddingVertical: 12 }}
+            onContentSizeChange={() => {
+              flatListRef.current?.scrollToEnd({ animated: false });
+            }}
             renderItem={(props) => {
               return (
                 <CardMessage item={props?.item} key={`chat-${props?.index}`} />

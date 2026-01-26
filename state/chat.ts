@@ -106,6 +106,6 @@ export const UPDATE_MESSAGE_ATOM = atom(
     const GET_MESSAGE = GET_CHAT?.messages.find((m) => m.id === messageId);
     if (!GET_MESSAGE) return;
 
-    set(GET_MESSAGE.text, newText);
+    set(GET_MESSAGE.text, get(GET_MESSAGE.text) + newText);
   },
 );
