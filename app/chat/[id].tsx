@@ -105,6 +105,7 @@ const Index = () => {
         timestamp: Date.now(),
       },
     });
+    flatListRef.current?.scrollToEnd({ animated: false });
 
     const history = GET_CONTEXT(session.id);
 

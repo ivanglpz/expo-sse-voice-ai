@@ -8,8 +8,6 @@ import {
 import Svg, { Path } from "react-native-svg";
 import { ChipStatus } from "./ChipStatus";
 
-const loremText = `Lorem ipsum, dolor sit amet consectetur adipisicing elit. Doloremque non maxime tempora explicabo quae dolorem modi ratione illum. Est ducimus id quam nisi facere. Sint magnam quod adipisci neque voluptatibus?`;
-
 type InputProps = {
   value: string;
   onChange: (value: string) => void;
@@ -23,7 +21,12 @@ export const InputAutoResizing = ({
   isLoading,
 }: InputProps) => {
   return (
-    <View style={[]}>
+    <View
+      style={{
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
       <View
         style={[
           {
