@@ -1,4 +1,10 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import {
+  setAudioModeAsync,
+  useAudioPlayer,
+  useAudioPlayerStatus,
+} from "expo-audio";
+import { File, Paths } from "expo-file-system";
 import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
 import { atom, useAtomValue, useSetAtom } from "jotai";
 import { useEffect, useRef, useState } from "react";
@@ -28,15 +34,17 @@ import {
 import { UUID } from "../../utils/uuid";
 
 AudioManager.setAudioSessionOptions({
-  iosCategory: "record",
+  iosCategory: "playAndRecord",
   iosMode: "default",
   iosOptions: [],
 });
+
 const audioRecorder = new AudioRecorder();
 
 const sampleRate = 16000;
-const bufferLength = Math.floor(sampleRate * 0.02); // 20ms => 320 samples
+const bufferLength = Math.floor(sampleRate * 0.02);
 const channelCount = 1;
+
 const float32ToInt16 = (input: Float32Array) => {
   const out = new Int16Array(input.length);
   for (let i = 0; i < input.length; i++) {
@@ -46,29 +54,88 @@ const float32ToInt16 = (input: Float32Array) => {
   return out;
 };
 
+const base64ToBytes = (base64: string): Uint8Array => {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+};
+
 const Index = () => {
   const router = useRouter();
   const params = useLocalSearchParams<{ id: string }>();
   const [isRecording, setIsRecording] = useState(false);
-  if (!params.id) {
-    return <Redirect href="/" />;
-  }
+  const [text, setText] = useState("");
 
   const LIST_SESSIONS = useAtomValue(CHATS_ATOM);
   const session = LIST_SESSIONS.find((s) => s.id === params.id);
 
-  if (!session) {
-    return <Redirect href="/" />;
-  }
-
-  const [text, setText] = useState("");
   const CREATE_MESSAGE = useSetAtom(CREATE_MESSAGE_ATOM);
   const DELETE_MESSAGE = useSetAtom(DELETE_MESSAGE_ATOM);
   const GET_CONTEXT = useSetAtom(GET_HISTORY_CHAT);
   const UPDATE_MESSAGE = useSetAtom(UPDATE_MESSAGE_ATOM);
-  const flatListRef = useRef<FlatList<Message>>(null);
 
+  const flatListRef = useRef<FlatList<Message>>(null);
   const currentAIMessageId = useRef<string | null>(null);
+
+  const player = useAudioPlayer();
+  const playerStatus = useAudioPlayerStatus(player);
+  const currentAudioFileRef = useRef<File | null>(null);
+
+  if (!params.id || !session) {
+    return <Redirect href="/" />;
+  }
+
+  useEffect(() => {
+    setAudioModeAsync({
+      allowsRecording: true,
+      playsInSilentMode: true,
+      interruptionMode: "duckOthers",
+      shouldPlayInBackground: false,
+    }).catch((e) => console.error("[AUDIO] setAudioModeAsync error", e));
+
+    return () => {
+      try {
+        player.pause();
+      } catch {}
+      if (currentAudioFileRef.current?.exists) {
+        currentAudioFileRef.current.delete();
+      }
+      currentAudioFileRef.current = null;
+    };
+  }, [player]);
+
+  useEffect(() => {
+    if (!playerStatus?.didJustFinish) return;
+    const finishedFile = currentAudioFileRef.current;
+    if (finishedFile?.exists) {
+      finishedFile.delete();
+    }
+    currentAudioFileRef.current = null;
+  }, [playerStatus?.didJustFinish]);
+
+  const playAssistantAudio = async (audioBase64: string) => {
+    try {
+      const nextFile = new File(Paths.cache, `assistant-${Date.now()}.mp3`);
+      nextFile.create({ overwrite: true });
+      nextFile.write(base64ToBytes(audioBase64));
+
+      const previous = currentAudioFileRef.current;
+      currentAudioFileRef.current = nextFile;
+
+      player.replace(nextFile.uri);
+      player.seekTo(0);
+      player.play();
+
+      if (previous?.exists) {
+        previous.delete();
+      }
+    } catch (error) {
+      console.error("[VOICE] Error reproduciendo audio IA:", error);
+    }
+  };
 
   const { isStreaming, startStream } = useSSEStream({
     url: `${CONFIG.API_URL}/chat`,
@@ -79,11 +146,10 @@ const Index = () => {
           messageId: currentAIMessageId.current,
           newText: data.content,
         });
-
         flatListRef.current?.scrollToEnd({ animated: false });
       }
     },
-    onError: (error) => {
+    onError: () => {
       if (currentAIMessageId.current) {
         DELETE_MESSAGE({
           chatId: session.id,
@@ -91,15 +157,11 @@ const Index = () => {
         });
         Alert.alert("Error", "Failed to get AI response");
       }
-
       currentAIMessageId.current = null;
     },
-    onOpen: () => {
-      console.log("SSE Connection opened");
-    },
+    onOpen: () => console.log("SSE Connection opened"),
     onClose: () => {
       console.log("SSE connection closed");
-
       currentAIMessageId.current = null;
     },
     timeout: 3000,
@@ -141,41 +203,87 @@ const Index = () => {
 
     startStream({
       method: "POST",
-      body: {
-        message: userText,
-        history: history,
-      },
+      body: { message: userText, history },
     });
   };
 
-  const { send, disconnect, isConnected } = useSocketIO<Message>(
-    CONFIG.API_URL,
-    {
-      autoConnect: true,
-      onConnect: () =>
-        console.log(`🟢 Socket.IO connected for ${CONFIG.API_URL}`),
-      onDisconnect: (reason) => {},
-      onError: (err) => {},
-      onMessage: (event, data) => {
-        if (event === "transcript:final") {
-          const transcriptText =
-            typeof data === "object" && data !== null && "text" in data
-              ? String((data as any).text ?? "")
-              : "";
+  const { send, disconnect, isConnected } = useSocketIO<any>(CONFIG.API_URL, {
+    autoConnect: true,
+    onConnect: () =>
+      console.log(`🟢 Socket.IO connected for ${CONFIG.API_URL}`),
+    onDisconnect: () => {},
+    onError: () => {},
+    onMessage: async (event, data) => {
+      if (event === "transcript:final") {
+        const transcriptText =
+          typeof data === "object" && data !== null && "text" in data
+            ? String((data as any).text ?? "")
+            : "";
 
-          if (transcriptText.trim().length > 0) {
-            console.log(
-              `[VOICE] ✅ Transcripción completada para chat ${session.id}: "${transcriptText}"`,
-            );
-          } else {
-            console.log(
-              `[VOICE] ⚠️ Se recibió transcript:final pero llegó vacío para chat ${session.id}`,
-            );
-          }
+        if (transcriptText.trim().length > 0) {
+          CREATE_MESSAGE({
+            chatId: session.id,
+            message: {
+              id: UUID(),
+              type: "user",
+              text: atom(transcriptText),
+              timestamp: Date.now(),
+            },
+          });
+          flatListRef.current?.scrollToEnd({ animated: false });
         }
-      },
+        return;
+      }
+
+      if (event === "assistant:response") {
+        const aiText =
+          typeof data === "object" && data !== null && "text" in data
+            ? String((data as any).text ?? "")
+            : "";
+
+        if (aiText.trim().length > 0) {
+          CREATE_MESSAGE({
+            chatId: session.id,
+            message: {
+              id: UUID(),
+              type: "ai",
+              text: atom(aiText),
+              timestamp: Date.now(),
+            },
+          });
+          flatListRef.current?.scrollToEnd({ animated: false });
+        }
+        return;
+      }
+
+      if (event === "assistant:audio") {
+        const audioBase64 =
+          typeof data === "object" && data !== null && "audioBase64" in data
+            ? String((data as any).audioBase64 ?? "")
+            : "";
+
+        if (audioBase64) {
+          await playAssistantAudio(audioBase64);
+        }
+        return;
+      }
+
+      if (event === "assistant:error") {
+        const message =
+          typeof data === "object" && data !== null && "message" in data
+            ? String((data as any).message ?? "Error de voz")
+            : "Error de voz";
+        Alert.alert("Asistente", message);
+      }
     },
-  );
+  });
+
+  useEffect(() => {
+    return () => {
+      disconnect?.();
+      audioRecorder.clearOnAudioReady();
+    };
+  }, [disconnect]);
 
   const handleStartCall = async () => {
     if (isRecording || !isConnected) return;
@@ -210,11 +318,7 @@ const Index = () => {
 
   useEffect(() => {
     audioRecorder.onAudioReady(
-      {
-        sampleRate,
-        bufferLength,
-        channelCount,
-      },
+      { sampleRate, bufferLength, channelCount },
       ({ buffer }) => {
         if (!isRecording || !isConnected) return;
         const mono = buffer.getChannelData(0);
@@ -226,7 +330,7 @@ const Index = () => {
     return () => {
       audioRecorder.clearOnAudioReady();
     };
-  }, [isRecording, isConnected]);
+  }, [isRecording, isConnected, send]);
 
   return (
     <SafeAreaView style={{ flex: 1 }}>
@@ -259,7 +363,7 @@ const Index = () => {
               <Text style={{ fontWeight: "bold", fontSize: 18 }}>Chat</Text>
               <Text style={{ fontSize: 12, opacity: 0.5 }}>{session.id}</Text>
             </View>
-            <View></View>
+            <View />
           </View>
 
           <FlatList
@@ -267,14 +371,12 @@ const Index = () => {
             ref={flatListRef}
             keyExtractor={(item) => item.id}
             contentContainerStyle={{ paddingVertical: 12 }}
-            onContentSizeChange={() => {
-              flatListRef.current?.scrollToEnd({ animated: false });
-            }}
-            renderItem={(props) => {
-              return (
-                <CardMessage item={props?.item} key={`chat-${props?.index}`} />
-              );
-            }}
+            onContentSizeChange={() =>
+              flatListRef.current?.scrollToEnd({ animated: false })
+            }
+            renderItem={(props) => (
+              <CardMessage item={props.item} key={`chat-${props.index}`} />
+            )}
           />
 
           {isStreaming && (
@@ -294,7 +396,7 @@ const Index = () => {
 
           <ChatInput
             value={text}
-            onChange={(e) => setText(e)}
+            onChange={setText}
             onSubmit={() => sendMessageWithStreaming(text)}
             isLoading={isStreaming}
             isRecording={isRecording}
