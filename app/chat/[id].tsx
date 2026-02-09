@@ -13,8 +13,8 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { CardMessage } from "../../components/CardMessage";
+import { ChatInput } from "../../components/ChatInput";
 import { DialogCall } from "../../components/DialogCall";
-import { InputAutoResizing } from "../../components/input";
 import { CONFIG } from "../../config/config";
 import { useSSEStream } from "../../hooks/useSSE";
 import AudioStream from "../../modules/expo-audio-stream";
@@ -222,7 +222,7 @@ const Index = () => {
             </View>
           )}
 
-          <InputAutoResizing
+          <ChatInput
             value={text}
             onChange={(e) => setText(e)}
             onSubmit={() => sendMessageWithStreaming(text)}
