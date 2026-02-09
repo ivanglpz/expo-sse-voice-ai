@@ -1,7 +1,7 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
 import { atom, useAtomValue, useSetAtom } from "jotai";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Alert,
   FlatList,
@@ -10,12 +10,12 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { AudioManager, AudioRecorder } from "react-native-audio-api";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { CardMessage } from "../../components/CardMessage";
 import { ChatInput } from "../../components/ChatInput";
 import { CONFIG } from "../../config/config";
 import { useSSEStream } from "../../hooks/useSSE";
-import AudioStream from "../../modules/expo-audio-stream";
 import {
   CHATS_ATOM,
   CREATE_MESSAGE_ATOM,
@@ -26,11 +26,18 @@ import {
 } from "../../state/chat";
 import { UUID } from "../../utils/uuid";
 
+AudioManager.setAudioSessionOptions({
+  iosCategory: "record",
+  iosMode: "default",
+  iosOptions: [],
+});
+const audioRecorder = new AudioRecorder();
+const sampleRate = 16000;
+
 const Index = () => {
   const router = useRouter();
   const params = useLocalSearchParams<{ id: string }>();
-  const [isCalling, setIsCalling] = useState(false);
-
+  const [isRecording, setIsRecording] = useState(false);
   if (!params.id) {
     return <Redirect href="/" />;
   }
@@ -130,22 +137,64 @@ const Index = () => {
   };
 
   const handleStartCall = async () => {
-    const hasPerm = await AudioStream.hasPermissions();
-    if (!hasPerm.granted) {
-      const req = await AudioStream.requestPermissions();
-      if (!req.granted) {
-        Alert.alert("Microphone permission required");
-        return;
-      }
+    if (isRecording) {
+      return;
     }
-    setIsCalling(true);
-    AudioStream.startStreaming();
+
+    // Make sure the permissions are granted
+    const permissions = await AudioManager.requestRecordingPermissions();
+
+    if (permissions !== "Granted") {
+      console.warn("Permissions are not granted");
+      return;
+    }
+
+    // Activate audio session
+    const success = await AudioManager.setAudioSessionActivity(true);
+
+    if (!success) {
+      console.warn("Could not activate the audio session");
+      return;
+    }
+
+    const result = audioRecorder.start();
+
+    if (result.status === "error") {
+      console.warn(result.message);
+      return;
+    }
+
+    setIsRecording(true);
   };
 
   const handleStopCall = async () => {
-    AudioStream.stopStreaming();
-    setIsCalling(false);
+    if (!isRecording) {
+      return;
+    }
+
+    audioRecorder.stop();
+    setIsRecording(false);
+    AudioManager.setAudioSessionActivity(false);
   };
+
+  useEffect(() => {
+    audioRecorder.onAudioReady(
+      {
+        sampleRate,
+        bufferLength: sampleRate * 0.1, // 0.1s of audio each batch
+        channelCount: 1,
+      },
+      ({ buffer, numFrames, when }) => {
+        console.log(buffer);
+
+        // do something with the data, i.e. stream it
+      },
+    );
+
+    return () => {
+      audioRecorder.clearOnAudioReady();
+    };
+  }, []);
 
   return (
     <SafeAreaView style={{ flex: 1 }}>
@@ -178,11 +227,7 @@ const Index = () => {
               <Text style={{ fontWeight: "bold", fontSize: 18 }}>Chat</Text>
               <Text style={{ fontSize: 12, opacity: 0.5 }}>{session.id}</Text>
             </View>
-            <View>
-              <TouchableOpacity onPress={handleStartCall}>
-                <Ionicons name="call" size={20} color="black" />
-              </TouchableOpacity>
-            </View>
+            <View></View>
           </View>
 
           <FlatList
@@ -220,7 +265,7 @@ const Index = () => {
             onChange={(e) => setText(e)}
             onSubmit={() => sendMessageWithStreaming(text)}
             isLoading={isStreaming}
-            isAudioActive={isCalling}
+            isRecording={isRecording}
             onStartAudio={handleStartCall}
             onStopAudio={handleStopCall}
           />

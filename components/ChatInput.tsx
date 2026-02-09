@@ -13,7 +13,7 @@ type InputProps = {
   onChange: (value: string) => void;
   onSubmit: () => void;
   isLoading: boolean;
-  isAudioActive?: boolean;
+  isRecording: boolean;
   onStartAudio?: () => void;
   onStopAudio?: () => void;
 };
@@ -23,19 +23,22 @@ export const ChatInput = (props: InputProps) => {
     value,
     onSubmit,
     isLoading,
-    isAudioActive = false,
+    isRecording,
     onStartAudio,
     onStopAudio,
   } = props;
 
   const hasValue = Boolean(value);
-  const isBusy = isLoading && !isAudioActive;
-  const handleAudioPress = isAudioActive ? onStopAudio : onStartAudio;
+  const isBusy = isLoading && !isRecording;
+  const handleAudioPress = isRecording ? onStopAudio : onStartAudio;
   const isAudioActionDisabled = isBusy || !handleAudioPress;
-  const buttonStyle = [styles.actionButton, isBusy && styles.actionButtonDisabled];
+  const buttonStyle = [
+    styles.actionButton,
+    isBusy && styles.actionButtonDisabled,
+  ];
   const audioButtonStyle = [
     styles.actionButton,
-    isAudioActive ? styles.actionButtonDanger : null,
+    isRecording ? styles.actionButtonDanger : null,
     (isBusy || !handleAudioPress) && styles.actionButtonDisabled,
   ];
 
@@ -78,11 +81,7 @@ export const ChatInput = (props: InputProps) => {
             {isBusy ? (
               <ActivityIndicator size="small" color="white" />
             ) : (
-              <Ionicons
-                name={isAudioActive ? "call" : "mic"}
-                color="white"
-                size={18}
-              />
+              <Ionicons name={"call"} color="white" size={16} />
             )}
           </TouchableOpacity>
         ) : null}
