@@ -15,7 +15,7 @@ export type UseSocketIOOptions<T = any> = {
 export type UseSocketIOReturn<T = any> = {
   socket: Socket | null;
   isConnected: boolean;
-  send: (event: string, data: any) => void;
+  send: (event: string, data?: any) => void;
   connect: () => void;
   disconnect: () => void;
 };

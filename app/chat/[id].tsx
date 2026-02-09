@@ -16,6 +16,7 @@ import { CardMessage } from "../../components/CardMessage";
 import { ChatInput } from "../../components/ChatInput";
 import { CONFIG } from "../../config/config";
 import { useSSEStream } from "../../hooks/useSSE";
+import { useSocketIO } from "../../hooks/useWebSocket";
 import {
   CHATS_ATOM,
   CREATE_MESSAGE_ATOM,
@@ -147,43 +148,62 @@ const Index = () => {
     });
   };
 
+  const { send, disconnect, isConnected } = useSocketIO<Message>(
+    CONFIG.API_URL,
+    {
+      autoConnect: true,
+      onConnect: () =>
+        console.log(`🟢 Socket.IO connected for ${CONFIG.API_URL}`),
+      onDisconnect: (reason) => {},
+      onError: (err) => {},
+      onMessage: (event, data) => {
+        if (event === "transcript:final") {
+          const transcriptText =
+            typeof data === "object" && data !== null && "text" in data
+              ? String((data as any).text ?? "")
+              : "";
+
+          if (transcriptText.trim().length > 0) {
+            console.log(
+              `[VOICE] ✅ Transcripción completada para chat ${session.id}: "${transcriptText}"`,
+            );
+          } else {
+            console.log(
+              `[VOICE] ⚠️ Se recibió transcript:final pero llegó vacío para chat ${session.id}`,
+            );
+          }
+        }
+      },
+    },
+  );
+
   const handleStartCall = async () => {
-    if (isRecording) {
-      return;
-    }
+    if (isRecording || !isConnected) return;
 
-    // Make sure the permissions are granted
     const permissions = await AudioManager.requestRecordingPermissions();
+    if (permissions !== "Granted") return;
 
-    if (permissions !== "Granted") {
-      console.warn("Permissions are not granted");
-      return;
-    }
-
-    // Activate audio session
     const success = await AudioManager.setAudioSessionActivity(true);
+    if (!success) return;
 
-    if (!success) {
-      console.warn("Could not activate the audio session");
-      return;
-    }
+    send("audio:start", {
+      chatId: session.id,
+      sampleRate: 16000,
+      channels: 1,
+      encoding: "pcm_s16le",
+    });
 
     const result = audioRecorder.start();
-
-    if (result.status === "error") {
-      console.warn(result.message);
-      return;
-    }
+    if (result.status === "error") return;
 
     setIsRecording(true);
   };
 
   const handleStopCall = async () => {
-    if (!isRecording) {
-      return;
-    }
+    if (!isRecording) return;
 
     audioRecorder.stop();
+    send("audio:stop");
     setIsRecording(false);
     AudioManager.setAudioSessionActivity(false);
   };
@@ -196,22 +216,17 @@ const Index = () => {
         channelCount,
       },
       ({ buffer }) => {
-        const mono = buffer.getChannelData(0); // Float32Array [-1, 1]
-        const pcm16 = float32ToInt16(mono); // Int16Array
-
-        console.log(pcm16);
-
-        // Enviar binario al backend (no base64)
-        // if (wsRef.current?.readyState === WebSocket.OPEN) {
-        //   wsRef.current.send(pcm16.buffer); // ArrayBuffer
-        // }
+        if (!isRecording || !isConnected) return;
+        const mono = buffer.getChannelData(0);
+        const pcm16 = float32ToInt16(mono);
+        send("audio:chunk", new Uint8Array(pcm16.buffer));
       },
     );
 
     return () => {
       audioRecorder.clearOnAudioReady();
     };
-  }, []);
+  }, [isRecording, isConnected]);
 
   return (
     <SafeAreaView style={{ flex: 1 }}>
