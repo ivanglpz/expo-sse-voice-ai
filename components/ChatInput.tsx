@@ -13,14 +13,30 @@ type InputProps = {
   onChange: (value: string) => void;
   onSubmit: () => void;
   isLoading: boolean;
+  isAudioActive?: boolean;
+  onStartAudio?: () => void;
+  onStopAudio?: () => void;
 };
 export const ChatInput = (props: InputProps) => {
-  const { onChange, value, onSubmit, isLoading } = props;
+  const {
+    onChange,
+    value,
+    onSubmit,
+    isLoading,
+    isAudioActive = false,
+    onStartAudio,
+    onStopAudio,
+  } = props;
 
   const hasValue = Boolean(value);
-  const buttonStyle = [
+  const isBusy = isLoading && !isAudioActive;
+  const handleAudioPress = isAudioActive ? onStopAudio : onStartAudio;
+  const isAudioActionDisabled = isBusy || !handleAudioPress;
+  const buttonStyle = [styles.actionButton, isBusy && styles.actionButtonDisabled];
+  const audioButtonStyle = [
     styles.actionButton,
-    isLoading && styles.actionButtonDisabled,
+    isAudioActive ? styles.actionButtonDanger : null,
+    (isBusy || !handleAudioPress) && styles.actionButtonDisabled,
   ];
 
   return (
@@ -55,25 +71,29 @@ export const ChatInput = (props: InputProps) => {
       <View style={styles.actionsContainer}>
         {!hasValue ? (
           <TouchableOpacity
-            onPress={onSubmit}
-            disabled={isLoading}
-            style={buttonStyle}
+            onPress={handleAudioPress}
+            disabled={isAudioActionDisabled}
+            style={audioButtonStyle}
           >
-            {isLoading ? (
-              <ActivityIndicator size="small" color="black" />
+            {isBusy ? (
+              <ActivityIndicator size="small" color="white" />
             ) : (
-              <Ionicons name="mic" color="white" size={18} />
+              <Ionicons
+                name={isAudioActive ? "call" : "mic"}
+                color="white"
+                size={18}
+              />
             )}
           </TouchableOpacity>
         ) : null}
         {hasValue ? (
           <TouchableOpacity
             onPress={onSubmit}
-            disabled={isLoading}
+            disabled={isBusy}
             style={buttonStyle}
           >
-            {isLoading ? (
-              <ActivityIndicator size="small" color="black" />
+            {isBusy ? (
+              <ActivityIndicator size="small" color="white" />
             ) : (
               <Ionicons name="arrow-up" color="white" size={18} />
             )}
@@ -108,7 +128,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   actionButton: {
-    backgroundColor: "black",
+    backgroundColor: "#207de6",
     padding: 8,
     borderRadius: 100,
     width: 40,
@@ -118,5 +138,8 @@ const styles = StyleSheet.create({
   },
   actionButtonDisabled: {
     backgroundColor: "#ccc",
+  },
+  actionButtonDanger: {
+    backgroundColor: "#dc2626",
   },
 });
