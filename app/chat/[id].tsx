@@ -32,7 +32,18 @@ AudioManager.setAudioSessionOptions({
   iosOptions: [],
 });
 const audioRecorder = new AudioRecorder();
+
 const sampleRate = 16000;
+const bufferLength = Math.floor(sampleRate * 0.02); // 20ms => 320 samples
+const channelCount = 1;
+const float32ToInt16 = (input: Float32Array) => {
+  const out = new Int16Array(input.length);
+  for (let i = 0; i < input.length; i++) {
+    const s = Math.max(-1, Math.min(1, input[i]));
+    out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+  }
+  return out;
+};
 
 const Index = () => {
   const router = useRouter();
@@ -181,13 +192,19 @@ const Index = () => {
     audioRecorder.onAudioReady(
       {
         sampleRate,
-        bufferLength: sampleRate * 0.1, // 0.1s of audio each batch
-        channelCount: 1,
+        bufferLength,
+        channelCount,
       },
-      ({ buffer, numFrames, when }) => {
-        console.log(buffer);
+      ({ buffer }) => {
+        const mono = buffer.getChannelData(0); // Float32Array [-1, 1]
+        const pcm16 = float32ToInt16(mono); // Int16Array
 
-        // do something with the data, i.e. stream it
+        console.log(pcm16);
+
+        // Enviar binario al backend (no base64)
+        // if (wsRef.current?.readyState === WebSocket.OPEN) {
+        //   wsRef.current.send(pcm16.buffer); // ArrayBuffer
+        // }
       },
     );
 
