@@ -33,11 +33,7 @@ import {
   UPDATE_MESSAGE_ATOM,
 } from "../../state/chat";
 import { UUID } from "../../utils/uuid";
-import {
-  concatChunks,
-  float32ToInt16,
-  toUint8Array,
-} from "./utils/audio";
+import { concatChunks, float32ToInt16, toUint8Array } from "./utils/audio";
 import { readStringField } from "./utils/payload";
 
 AudioManager.setAudioSessionOptions({
@@ -52,6 +48,7 @@ const sampleRate = 16000;
 const bufferLength = Math.floor(sampleRate * 0.02);
 const channelCount = 1;
 const MIC_RESUME_COOLDOWN_MS = 350;
+const ASSISTANT_AUDIO_MIN_SEGMENT_BYTES = 24 * 1024;
 
 const ASSISTANT_VOICE_ERROR = "Error de voz";
 
@@ -81,6 +78,9 @@ const ChatScreen = () => {
   const currentAudioFileRef = useRef<File | null>(null);
 
   const incomingAudioChunksRef = useRef<Uint8Array[]>([]);
+  const incomingAudioBytesRef = useRef(0);
+  const assistantAudioQueueRef = useRef<Uint8Array[]>([]);
+  const isAssistantAudioStreamOpenRef = useRef(false);
   const isAssistantSpeakingRef = useRef(false);
   const isAssistantPlaybackActiveRef = useRef(false);
   const resumeMicAtRef = useRef(0);
@@ -115,6 +115,19 @@ const ChatScreen = () => {
     [CREATE_MESSAGE, scrollToBottom, session.id],
   );
 
+  const finishAssistantTurn = useCallback(() => {
+    isAssistantPlaybackActiveRef.current = false;
+    isAssistantSpeakingRef.current = false;
+    resumeMicAtRef.current = Date.now() + MIC_RESUME_COOLDOWN_MS;
+  }, []);
+
+  const resetAssistantAudioPipeline = useCallback(() => {
+    incomingAudioChunksRef.current = [];
+    incomingAudioBytesRef.current = 0;
+    assistantAudioQueueRef.current = [];
+    isAssistantAudioStreamOpenRef.current = false;
+  }, []);
+
   useEffect(() => {
     setAudioModeAsync({
       allowsRecording: true,
@@ -129,26 +142,13 @@ const ChatScreen = () => {
         currentAudioFileRef.current.delete();
       }
       currentAudioFileRef.current = null;
-      incomingAudioChunksRef.current = [];
-      isAssistantPlaybackActiveRef.current = false;
-      isAssistantSpeakingRef.current = false;
+      resetAssistantAudioPipeline();
+      finishAssistantTurn();
     };
-  }, [player]);
-
-  useEffect(() => {
-    if (!playerStatus?.didJustFinish) return;
-    const finishedFile = currentAudioFileRef.current;
-    if (finishedFile?.exists) {
-      finishedFile.delete();
-    }
-    currentAudioFileRef.current = null;
-    isAssistantPlaybackActiveRef.current = false;
-    isAssistantSpeakingRef.current = false;
-    resumeMicAtRef.current = Date.now() + MIC_RESUME_COOLDOWN_MS;
-  }, [playerStatus?.didJustFinish]);
+  }, [finishAssistantTurn, player, resetAssistantAudioPipeline]);
 
   const playAssistantAudio = useCallback(
-    async (audioBytes: Uint8Array) => {
+    (audioBytes: Uint8Array) => {
       try {
         isAssistantPlaybackActiveRef.current = true;
         isAssistantSpeakingRef.current = true;
@@ -167,15 +167,66 @@ const ChatScreen = () => {
         if (previous?.exists) {
           previous.delete();
         }
+        return true;
       } catch (error) {
         isAssistantPlaybackActiveRef.current = false;
-        isAssistantSpeakingRef.current = false;
-        resumeMicAtRef.current = Date.now() + MIC_RESUME_COOLDOWN_MS;
         console.error("[VOICE] Error reproduciendo audio IA:", error);
+        return false;
       }
     },
     [player],
   );
+
+  const tryPlayNextAssistantSegment = useCallback(() => {
+    if (isAssistantPlaybackActiveRef.current) return;
+
+    while (assistantAudioQueueRef.current.length > 0) {
+      const nextSegment = assistantAudioQueueRef.current.shift();
+      if (!nextSegment || nextSegment.length === 0) {
+        continue;
+      }
+      const started = playAssistantAudio(nextSegment);
+      if (started) {
+        return;
+      }
+    }
+
+    if (!isAssistantAudioStreamOpenRef.current) {
+      finishAssistantTurn();
+    }
+  }, [finishAssistantTurn, playAssistantAudio]);
+
+  const flushIncomingAudioBuffer = useCallback(
+    (force = false) => {
+      if (incomingAudioBytesRef.current === 0) return;
+      if (
+        !force &&
+        incomingAudioBytesRef.current < ASSISTANT_AUDIO_MIN_SEGMENT_BYTES
+      ) {
+        return;
+      }
+
+      const segment = concatChunks(incomingAudioChunksRef.current);
+      incomingAudioChunksRef.current = [];
+      incomingAudioBytesRef.current = 0;
+
+      if (segment.length === 0) return;
+      assistantAudioQueueRef.current.push(segment);
+      tryPlayNextAssistantSegment();
+    },
+    [tryPlayNextAssistantSegment],
+  );
+
+  useEffect(() => {
+    if (!playerStatus?.didJustFinish) return;
+    const finishedFile = currentAudioFileRef.current;
+    if (finishedFile?.exists) {
+      finishedFile.delete();
+    }
+    currentAudioFileRef.current = null;
+    isAssistantPlaybackActiveRef.current = false;
+    tryPlayNextAssistantSegment();
+  }, [playerStatus?.didJustFinish, tryPlayNextAssistantSegment]);
 
   const onStreamMessage = useCallback(
     (data: { content?: string }) => {
@@ -217,7 +268,7 @@ const ChatScreen = () => {
   });
 
   const onSocketMessage = useCallback(
-    async (event: string, data: unknown) => {
+    (event: string, data: unknown) => {
       if (event === "transcript:final") {
         appendMessage("user", readStringField(data, "text"));
         return;
@@ -229,8 +280,15 @@ const ChatScreen = () => {
       }
 
       if (event === "assistant:audio:start") {
+        player.pause();
+        if (currentAudioFileRef.current?.exists) {
+          currentAudioFileRef.current.delete();
+        }
+        currentAudioFileRef.current = null;
+        isAssistantPlaybackActiveRef.current = false;
+        resetAssistantAudioPipeline();
+        isAssistantAudioStreamOpenRef.current = true;
         isAssistantSpeakingRef.current = true;
-        incomingAudioChunksRef.current = [];
         return;
       }
 
@@ -238,33 +296,35 @@ const ChatScreen = () => {
         const chunk = toUint8Array(data);
         if (chunk && chunk.length > 0) {
           incomingAudioChunksRef.current.push(chunk);
+          incomingAudioBytesRef.current += chunk.length;
+          flushIncomingAudioBuffer(false);
         }
         return;
       }
 
       if (event === "assistant:audio:end") {
-        const fullAudio = concatChunks(incomingAudioChunksRef.current);
-        incomingAudioChunksRef.current = [];
-        if (fullAudio.length > 0) {
-          await playAssistantAudio(fullAudio);
-          return;
-        }
-        isAssistantPlaybackActiveRef.current = false;
-        isAssistantSpeakingRef.current = false;
-        resumeMicAtRef.current = Date.now() + MIC_RESUME_COOLDOWN_MS;
+        isAssistantAudioStreamOpenRef.current = false;
+        flushIncomingAudioBuffer(true);
+        tryPlayNextAssistantSegment();
+        return;
       }
 
       if (event === "assistant:error") {
-        incomingAudioChunksRef.current = [];
-        isAssistantPlaybackActiveRef.current = false;
-        isAssistantSpeakingRef.current = false;
-        resumeMicAtRef.current = Date.now() + MIC_RESUME_COOLDOWN_MS;
+        resetAssistantAudioPipeline();
+        finishAssistantTurn();
         const message =
           readStringField(data, "message") || ASSISTANT_VOICE_ERROR;
         Alert.alert("Asistente", message);
       }
     },
-    [appendMessage, playAssistantAudio],
+    [
+      appendMessage,
+      finishAssistantTurn,
+      flushIncomingAudioBuffer,
+      player,
+      resetAssistantAudioPipeline,
+      tryPlayNextAssistantSegment,
+    ],
   );
 
   const { send, disconnect, isConnected } = useSocketIO<unknown>(
@@ -365,13 +425,21 @@ const ChatScreen = () => {
   }, [session.id]);
 
   const handleStopCall = useCallback(async () => {
-    if (!isRecordingRef.current) return;
+    if (isRecordingRef.current) {
+      audioRecorder.stop();
+      sendRef.current("audio:stop");
+      setIsRecording(false);
+      AudioManager.setAudioSessionActivity(false);
+    }
 
-    audioRecorder.stop();
-    sendRef.current("audio:stop");
-    setIsRecording(false);
-    AudioManager.setAudioSessionActivity(false);
-  }, []);
+    player.pause();
+    if (currentAudioFileRef.current?.exists) {
+      currentAudioFileRef.current.delete();
+    }
+    currentAudioFileRef.current = null;
+    resetAssistantAudioPipeline();
+    finishAssistantTurn();
+  }, [finishAssistantTurn, player, resetAssistantAudioPipeline]);
 
   useEffect(() => {
     audioRecorder.onAudioReady(
@@ -397,13 +465,6 @@ const ChatScreen = () => {
     };
   }, []);
 
-  const renderMessage = useCallback(
-    ({ item }: { item: Message }) => <CardMessage item={item} />,
-    [],
-  );
-
-  const keyExtractor = useCallback((item: Message) => item.id, []);
-
   return (
     <SafeAreaView style={styles.safeArea}>
       <KeyboardAvoidingView behavior="padding" style={styles.keyboardContainer}>
@@ -424,10 +485,12 @@ const ChatScreen = () => {
           <FlatList
             data={session.messages}
             ref={flatListRef}
-            keyExtractor={keyExtractor}
+            keyExtractor={(item: Message) => item.id}
             contentContainerStyle={styles.listContent}
             onContentSizeChange={scrollToBottom}
-            renderItem={renderMessage}
+            renderItem={({ item }: { item: Message }) => (
+              <CardMessage item={item} />
+            )}
           />
 
           {isStreaming ? (
