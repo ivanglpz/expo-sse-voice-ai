@@ -7,13 +7,14 @@ import {
 import { File, Paths } from "expo-file-system";
 import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
 import { atom, useAtomValue, useSetAtom } from "jotai";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   FlatList,
   KeyboardAvoidingView,
+  Pressable,
+  StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from "react-native";
 import { AudioManager, AudioRecorder } from "react-native-audio-api";
@@ -45,6 +46,8 @@ const sampleRate = 16000;
 const bufferLength = Math.floor(sampleRate * 0.02);
 const channelCount = 1;
 const MIC_RESUME_COOLDOWN_MS = 350;
+
+const ASSISTANT_VOICE_ERROR = "Error de voz";
 
 const float32ToInt16 = (input: Float32Array) => {
   const out = new Int16Array(input.length);
@@ -89,14 +92,25 @@ const concatChunks = (chunks: Uint8Array[]) => {
   return out;
 };
 
-const Index = () => {
+const readStringField = (payload: unknown, key: string): string => {
+  if (typeof payload !== "object" || payload === null || !(key in payload)) {
+    return "";
+  }
+  return String((payload as Record<string, unknown>)[key] ?? "");
+};
+
+const ChatScreen = () => {
   const router = useRouter();
   const params = useLocalSearchParams<{ id: string }>();
   const [isRecording, setIsRecording] = useState(false);
   const [text, setText] = useState("");
 
   const LIST_SESSIONS = useAtomValue(CHATS_ATOM);
-  const session = LIST_SESSIONS.find((s) => s.id === params.id);
+  const chatId = params.id;
+  const session = useMemo(
+    () => LIST_SESSIONS.find((candidate) => candidate.id === chatId),
+    [LIST_SESSIONS, chatId],
+  );
 
   const CREATE_MESSAGE = useSetAtom(CREATE_MESSAGE_ATOM);
   const DELETE_MESSAGE = useSetAtom(DELETE_MESSAGE_ATOM);
@@ -113,10 +127,36 @@ const Index = () => {
   const incomingAudioChunksRef = useRef<Uint8Array[]>([]);
   const isAssistantSpeakingRef = useRef(false);
   const resumeMicAtRef = useRef(0);
+  const isRecordingRef = useRef(isRecording);
+  const isConnectedRef = useRef(false);
+  const sendRef = useRef<(event: string, data?: unknown) => void>(() => {});
 
-  if (!params.id || !session) {
+  if (!chatId || !session) {
     return <Redirect href="/" />;
   }
+
+  const scrollToBottom = useCallback(() => {
+    flatListRef.current?.scrollToEnd({ animated: false });
+  }, []);
+
+  const appendMessage = useCallback(
+    (type: Message["type"], rawText: string) => {
+      const messageText = rawText.trim();
+      if (!messageText) return;
+
+      CREATE_MESSAGE({
+        chatId: session.id,
+        message: {
+          id: UUID(),
+          type,
+          text: atom(messageText),
+          timestamp: Date.now(),
+        },
+      });
+      scrollToBottom();
+    },
+    [CREATE_MESSAGE, scrollToBottom, session.id],
+  );
 
   useEffect(() => {
     setAudioModeAsync({
@@ -148,143 +188,78 @@ const Index = () => {
     currentAudioFileRef.current = null;
   }, [playerStatus?.didJustFinish]);
 
-  const playAssistantAudio = async (audioBytes: Uint8Array) => {
-    try {
-      const nextFile = new File(Paths.cache, `assistant-${Date.now()}.mp3`);
-      nextFile.create({ overwrite: true });
-      nextFile.write(audioBytes);
+  const playAssistantAudio = useCallback(
+    async (audioBytes: Uint8Array) => {
+      try {
+        const nextFile = new File(Paths.cache, `assistant-${Date.now()}.mp3`);
+        nextFile.create({ overwrite: true });
+        nextFile.write(audioBytes);
 
-      const previous = currentAudioFileRef.current;
-      currentAudioFileRef.current = nextFile;
+        const previous = currentAudioFileRef.current;
+        currentAudioFileRef.current = nextFile;
 
-      player.replace(nextFile.uri);
-      player.seekTo(0);
-      player.play();
+        player.replace(nextFile.uri);
+        player.seekTo(0);
+        player.play();
 
-      if (previous?.exists) {
-        previous.delete();
+        if (previous?.exists) {
+          previous.delete();
+        }
+      } catch (error) {
+        console.error("[VOICE] Error reproduciendo audio IA:", error);
       }
-    } catch (error) {
-      console.error("[VOICE] Error reproduciendo audio IA:", error);
+    },
+    [player],
+  );
+
+  const onStreamMessage = useCallback(
+    (data: { content?: string }) => {
+      if (!data.content || !currentAIMessageId.current) {
+        return;
+      }
+      UPDATE_MESSAGE({
+        sessionId: session.id,
+        messageId: currentAIMessageId.current,
+        newText: data.content,
+      });
+      scrollToBottom();
+    },
+    [UPDATE_MESSAGE, scrollToBottom, session.id],
+  );
+
+  const onStreamError = useCallback(() => {
+    if (currentAIMessageId.current) {
+      DELETE_MESSAGE({
+        chatId: session.id,
+        messageId: currentAIMessageId.current,
+      });
+      Alert.alert("Error", "Failed to get AI response");
     }
-  };
+    currentAIMessageId.current = null;
+  }, [DELETE_MESSAGE, session.id]);
+
+  const onStreamClose = useCallback(() => {
+    currentAIMessageId.current = null;
+  }, []);
 
   const { isStreaming, startStream } = useSSEStream({
     url: `${CONFIG.API_URL}/chat`,
-    onMessage: (data) => {
-      if (data.content && currentAIMessageId.current) {
-        UPDATE_MESSAGE({
-          sessionId: session.id,
-          messageId: currentAIMessageId.current,
-          newText: data.content,
-        });
-        flatListRef.current?.scrollToEnd({ animated: false });
-      }
-    },
-    onError: () => {
-      if (currentAIMessageId.current) {
-        DELETE_MESSAGE({
-          chatId: session.id,
-          messageId: currentAIMessageId.current,
-        });
-        Alert.alert("Error", "Failed to get AI response");
-      }
-      currentAIMessageId.current = null;
-    },
+    onMessage: onStreamMessage,
+    onError: onStreamError,
     onOpen: () => console.log("SSE Connection opened"),
-    onClose: () => {
-      console.log("SSE connection closed");
-      currentAIMessageId.current = null;
-    },
+    onClose: onStreamClose,
     timeout: 3000,
   });
 
-  const sendMessageWithStreaming = async (userText: string) => {
-    if (!Boolean(userText?.trim())) {
-      Alert.alert("Error", "Message cannot be empty");
-      return;
-    }
-
-    setText("");
-    const userMessageId = UUID();
-    CREATE_MESSAGE({
-      chatId: session.id,
-      message: {
-        id: userMessageId,
-        type: "user",
-        text: atom(userText),
-        timestamp: Date.now(),
-      },
-    });
-    flatListRef.current?.scrollToEnd({ animated: false });
-
-    const history = GET_CONTEXT(session.id);
-
-    const aiMessageId = UUID();
-    currentAIMessageId.current = aiMessageId;
-
-    CREATE_MESSAGE({
-      chatId: session.id,
-      message: {
-        id: aiMessageId,
-        type: "ai",
-        text: atom(""),
-        timestamp: Date.now(),
-      },
-    });
-
-    startStream({
-      method: "POST",
-      body: { message: userText, history },
-    });
-  };
-
-  const { send, disconnect, isConnected } = useSocketIO<any>(CONFIG.API_URL, {
-    autoConnect: true,
-    onConnect: () =>
-      console.log(`🟢 Socket.IO connected for ${CONFIG.API_URL}`),
-    onDisconnect: () => {},
-    onError: () => {},
-    onMessage: async (event, data) => {
+  const onSocketMessage = useCallback(
+    async (event: string, data: unknown) => {
       if (event === "transcript:final") {
-        const transcriptText =
-          typeof data === "object" && data !== null && "text" in data
-            ? String((data as any).text ?? "")
-            : "";
-
-        if (transcriptText.trim().length > 0) {
-          CREATE_MESSAGE({
-            chatId: session.id,
-            message: {
-              id: UUID(),
-              type: "user",
-              text: atom(transcriptText),
-              timestamp: Date.now(),
-            },
-          });
-          flatListRef.current?.scrollToEnd({ animated: false });
-        }
+        appendMessage("user", readStringField(data, "text"));
         return;
       }
 
       if (event === "assistant:response") {
-        const aiText =
-          typeof data === "object" && data !== null && "text" in data
-            ? String((data as any).text ?? "")
-            : "";
-
-        if (aiText.trim().length > 0) {
-          CREATE_MESSAGE({
-            chatId: session.id,
-            message: {
-              id: UUID(),
-              type: "ai",
-              text: atom(aiText),
-              timestamp: Date.now(),
-            },
-          });
-          flatListRef.current?.scrollToEnd({ animated: false });
-        }
+        appendMessage("ai", readStringField(data, "text"));
         return;
       }
 
@@ -308,7 +283,6 @@ const Index = () => {
         if (fullAudio.length > 0) {
           await playAssistantAudio(fullAudio);
         }
-
         isAssistantSpeakingRef.current = false;
         resumeMicAtRef.current = Date.now() + MIC_RESUME_COOLDOWN_MS;
         return;
@@ -318,25 +292,84 @@ const Index = () => {
         incomingAudioChunksRef.current = [];
         isAssistantSpeakingRef.current = false;
         resumeMicAtRef.current = Date.now() + MIC_RESUME_COOLDOWN_MS;
-
-        const message =
-          typeof data === "object" && data !== null && "message" in data
-            ? String((data as any).message ?? "Error de voz")
-            : "Error de voz";
+        const message = readStringField(data, "message") || ASSISTANT_VOICE_ERROR;
         Alert.alert("Asistente", message);
       }
     },
+    [appendMessage, playAssistantAudio],
+  );
+
+  const { send, disconnect, isConnected } = useSocketIO<unknown>(CONFIG.API_URL, {
+    autoConnect: true,
+    onConnect: () =>
+      console.log(`🟢 Socket.IO connected for ${CONFIG.API_URL}`),
+    onDisconnect: () => {},
+    onError: () => {},
+    onMessage: onSocketMessage,
   });
 
   useEffect(() => {
+    isRecordingRef.current = isRecording;
+  }, [isRecording]);
+
+  useEffect(() => {
+    isConnectedRef.current = isConnected;
+  }, [isConnected]);
+
+  useEffect(() => {
+    sendRef.current = send;
+  }, [send]);
+
+  useEffect(() => {
     return () => {
-      disconnect?.();
+      disconnect();
       audioRecorder.clearOnAudioReady();
     };
-  }, []);
+  }, [disconnect]);
 
-  const handleStartCall = async () => {
-    if (isRecording || !isConnected) return;
+  const sendMessageWithStreaming = useCallback(
+    async (userText: string) => {
+      const trimmedText = userText.trim();
+      if (!trimmedText) {
+        Alert.alert("Error", "Message cannot be empty");
+        return;
+      }
+
+      setText("");
+      appendMessage("user", trimmedText);
+
+      const history = GET_CONTEXT(session.id);
+      const aiMessageId = UUID();
+      currentAIMessageId.current = aiMessageId;
+
+      CREATE_MESSAGE({
+        chatId: session.id,
+        message: {
+          id: aiMessageId,
+          type: "ai",
+          text: atom(""),
+          timestamp: Date.now(),
+        },
+      });
+      scrollToBottom();
+
+      startStream({
+        method: "POST",
+        body: { message: trimmedText, history },
+      });
+    },
+    [
+      appendMessage,
+      CREATE_MESSAGE,
+      GET_CONTEXT,
+      scrollToBottom,
+      session.id,
+      startStream,
+    ],
+  );
+
+  const handleStartCall = useCallback(async () => {
+    if (isRecordingRef.current || !isConnectedRef.current) return;
 
     const permissions = await AudioManager.requestRecordingPermissions();
     if (permissions !== "Granted") return;
@@ -344,7 +377,7 @@ const Index = () => {
     const success = await AudioManager.setAudioSessionActivity(true);
     if (!success) return;
 
-    send("audio:start", {
+    sendRef.current("audio:start", {
       chatId: session.id,
       sampleRate: 16000,
       channels: 1,
@@ -352,100 +385,80 @@ const Index = () => {
     });
 
     const result = audioRecorder.start();
-    if (result.status === "error") return;
+    if (result.status === "error") {
+      AudioManager.setAudioSessionActivity(false);
+      return;
+    }
 
     setIsRecording(true);
-  };
+  }, [session.id]);
 
-  const handleStopCall = async () => {
-    if (!isRecording) return;
+  const handleStopCall = useCallback(async () => {
+    if (!isRecordingRef.current) return;
 
     audioRecorder.stop();
-    send("audio:stop");
+    sendRef.current("audio:stop");
     setIsRecording(false);
     AudioManager.setAudioSessionActivity(false);
-  };
+  }, []);
 
   useEffect(() => {
     audioRecorder.onAudioReady(
       { sampleRate, bufferLength, channelCount },
       ({ buffer }) => {
-        if (!isRecording || !isConnected) return;
+        if (!isRecordingRef.current || !isConnectedRef.current) return;
         if (isAssistantSpeakingRef.current) return;
         if (Date.now() < resumeMicAtRef.current) return;
 
         const mono = buffer.getChannelData(0);
         const pcm16 = float32ToInt16(mono);
-        send("audio:chunk", new Uint8Array(pcm16.buffer));
+        sendRef.current("audio:chunk", new Uint8Array(pcm16.buffer));
       },
     );
 
     return () => {
       audioRecorder.clearOnAudioReady();
     };
-  }, [isRecording, isConnected]);
+  }, []);
+
+  const renderMessage = useCallback(
+    ({ item }: { item: Message }) => <CardMessage item={item} />,
+    [],
+  );
+
+  const keyExtractor = useCallback((item: Message) => item.id, []);
 
   return (
-    <SafeAreaView style={{ flex: 1 }}>
-      <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
-        <View
-          style={{
-            backgroundColor: "white",
-            flex: 1,
-            display: "flex",
-            flexDirection: "column",
-            padding: 22,
-          }}
-        >
-          <View
-            style={{
-              width: "100%",
-              display: "flex",
-              flexDirection: "row",
-              justifyContent: "space-between",
-              alignItems: "center",
-              marginBottom: 12,
-            }}
-          >
-            <View>
-              <TouchableOpacity onPress={() => router.back()}>
+    <SafeAreaView style={styles.safeArea}>
+      <KeyboardAvoidingView behavior="padding" style={styles.keyboardContainer}>
+        <View style={styles.container}>
+          <View style={styles.header}>
+            <View style={styles.headerAction}>
+              <Pressable onPress={() => router.back()}>
                 <Ionicons name="arrow-back" size={24} color="black" />
-              </TouchableOpacity>
+              </Pressable>
             </View>
-            <View style={{ alignItems: "center" }}>
-              <Text style={{ fontWeight: "bold", fontSize: 18 }}>Chat</Text>
-              <Text style={{ fontSize: 12, opacity: 0.5 }}>{session.id}</Text>
+            <View style={styles.headerTitle}>
+              <Text style={styles.title}>Chat</Text>
+              <Text style={styles.subtitle}>{session.id}</Text>
             </View>
-            <View />
+            <View style={styles.headerAction} />
           </View>
 
           <FlatList
             data={session.messages}
             ref={flatListRef}
-            keyExtractor={(item) => item.id}
-            contentContainerStyle={{ paddingVertical: 12 }}
-            onContentSizeChange={() =>
-              flatListRef.current?.scrollToEnd({ animated: false })
-            }
-            renderItem={(props) => (
-              <CardMessage item={props.item} key={`chat-${props.index}`} />
-            )}
+            keyExtractor={keyExtractor}
+            contentContainerStyle={styles.listContent}
+            onContentSizeChange={scrollToBottom}
+            renderItem={renderMessage}
           />
 
-          {isStreaming && (
-            <View
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 8,
-                paddingVertical: 8,
-              }}
-            >
-              <Text style={{ fontSize: 12, opacity: 0.6 }}>
-                AI is thinking...
-              </Text>
+          {isStreaming ? (
+            <View style={styles.streamingBanner}>
+              <Text style={styles.streamingText}>AI is thinking...</Text>
             </View>
-          )}
+          ) : null}
 
           <ChatInput
             value={text}
@@ -462,4 +475,53 @@ const Index = () => {
   );
 };
 
-export default Index;
+const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+  },
+  keyboardContainer: {
+    flex: 1,
+  },
+  container: {
+    flex: 1,
+    backgroundColor: "white",
+    padding: 22,
+  },
+  header: {
+    width: "100%",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  headerAction: {
+    minWidth: 24,
+    minHeight: 24,
+  },
+  headerTitle: {
+    alignItems: "center",
+  },
+  title: {
+    fontWeight: "bold",
+    fontSize: 18,
+  },
+  subtitle: {
+    fontSize: 12,
+    opacity: 0.5,
+  },
+  listContent: {
+    paddingVertical: 12,
+  },
+  streamingBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 8,
+  },
+  streamingText: {
+    fontSize: 12,
+    opacity: 0.6,
+  },
+});
+
+export default ChatScreen;
