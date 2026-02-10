@@ -33,6 +33,12 @@ import {
   UPDATE_MESSAGE_ATOM,
 } from "../../state/chat";
 import { UUID } from "../../utils/uuid";
+import {
+  concatChunks,
+  float32ToInt16,
+  toUint8Array,
+} from "./utils/audio";
+import { readStringField } from "./utils/payload";
 
 AudioManager.setAudioSessionOptions({
   iosCategory: "playAndRecord",
@@ -48,56 +54,6 @@ const channelCount = 1;
 const MIC_RESUME_COOLDOWN_MS = 350;
 
 const ASSISTANT_VOICE_ERROR = "Error de voz";
-
-const float32ToInt16 = (input: Float32Array) => {
-  const out = new Int16Array(input.length);
-  for (let i = 0; i < input.length; i++) {
-    const s = Math.max(-1, Math.min(1, input[i]));
-    out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-  }
-  return out;
-};
-
-const toUint8Array = (value: unknown): Uint8Array | null => {
-  if (value instanceof Uint8Array) return value;
-  if (value instanceof ArrayBuffer) return new Uint8Array(value);
-  if (ArrayBuffer.isView(value)) {
-    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
-  }
-  if (Array.isArray(value) && value.every((n) => typeof n === "number")) {
-    return new Uint8Array(value);
-  }
-  if (
-    typeof value === "object" &&
-    value !== null &&
-    "data" in value &&
-    Array.isArray((value as { data: unknown }).data)
-  ) {
-    const raw = (value as { data: unknown[] }).data;
-    if (raw.every((n) => typeof n === "number")) {
-      return new Uint8Array(raw as number[]);
-    }
-  }
-  return null;
-};
-
-const concatChunks = (chunks: Uint8Array[]) => {
-  const total = chunks.reduce((sum, c) => sum + c.length, 0);
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return out;
-};
-
-const readStringField = (payload: unknown, key: string): string => {
-  if (typeof payload !== "object" || payload === null || !(key in payload)) {
-    return "";
-  }
-  return String((payload as Record<string, unknown>)[key] ?? "");
-};
 
 const ChatScreen = () => {
   const router = useRouter();
@@ -168,9 +124,7 @@ const ChatScreen = () => {
     }).catch((e) => console.error("[AUDIO] setAudioModeAsync error", e));
 
     return () => {
-      try {
-        player.pause();
-      } catch {}
+      player.pause();
       if (currentAudioFileRef.current?.exists) {
         currentAudioFileRef.current.delete();
       }
@@ -305,21 +259,25 @@ const ChatScreen = () => {
         isAssistantPlaybackActiveRef.current = false;
         isAssistantSpeakingRef.current = false;
         resumeMicAtRef.current = Date.now() + MIC_RESUME_COOLDOWN_MS;
-        const message = readStringField(data, "message") || ASSISTANT_VOICE_ERROR;
+        const message =
+          readStringField(data, "message") || ASSISTANT_VOICE_ERROR;
         Alert.alert("Asistente", message);
       }
     },
     [appendMessage, playAssistantAudio],
   );
 
-  const { send, disconnect, isConnected } = useSocketIO<unknown>(CONFIG.API_URL, {
-    autoConnect: true,
-    onConnect: () =>
-      console.log(`🟢 Socket.IO connected for ${CONFIG.API_URL}`),
-    onDisconnect: () => {},
-    onError: () => {},
-    onMessage: onSocketMessage,
-  });
+  const { send, disconnect, isConnected } = useSocketIO<unknown>(
+    CONFIG.API_URL,
+    {
+      autoConnect: true,
+      onConnect: () =>
+        console.log(`🟢 Socket.IO connected for ${CONFIG.API_URL}`),
+      onDisconnect: () => {},
+      onError: () => {},
+      onMessage: onSocketMessage,
+    },
+  );
 
   useEffect(() => {
     isRecordingRef.current = isRecording;
