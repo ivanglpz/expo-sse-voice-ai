@@ -81,7 +81,11 @@ export const ChatInput = (props: InputProps) => {
             {isBusy ? (
               <ActivityIndicator size="small" color="white" />
             ) : (
-              <Ionicons name={"call"} color="white" size={16} />
+              <Ionicons
+                name={isRecording ? "stop" : "mic"}
+                size={18}
+                color="white"
+              />
             )}
           </TouchableOpacity>
         ) : null}
