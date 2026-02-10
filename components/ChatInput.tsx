@@ -2,7 +2,6 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import {
   ActivityIndicator,
   StyleSheet,
-  Text,
   TextInput,
   TouchableOpacity,
   View,
@@ -30,21 +29,13 @@ export const ChatInput = (props: InputProps) => {
 
   const hasValue = Boolean(value);
   const isBusy = isLoading && !isRecording;
-  const handleAudioPress = isRecording ? onStopAudio : onStartAudio;
-  const isAudioActionDisabled = isBusy || !handleAudioPress;
-  const buttonStyle = [
-    styles.actionButton,
-    isBusy && styles.actionButtonDisabled,
-  ];
-  const audioButtonStyle = [
-    styles.actionButton,
-    isRecording ? styles.actionButtonDanger : null,
-    (isBusy || !handleAudioPress) && styles.actionButtonDisabled,
-  ];
+
+  const canStopAudio = Boolean(onStopAudio);
 
   return (
     <View style={styles.container}>
       <TextInput
+        value={value}
         editable
         multiline
         textAlignVertical="top"
@@ -64,42 +55,45 @@ export const ChatInput = (props: InputProps) => {
         textContentType="none"
         importantForAutofill="no"
         style={styles.input}
-      >
-        <Text>
-          {value?.match(/(\S+\s*|\s+)/g)?.map((e, index) => {
-            return <Text key={`words-${index}`}>{e}</Text>;
-          })}
-        </Text>
-      </TextInput>
+      />
       <View style={styles.actionsContainer}>
-        {!hasValue ? (
-          <TouchableOpacity
-            onPress={handleAudioPress}
-            disabled={isAudioActionDisabled}
-            style={audioButtonStyle}
-          >
-            {isBusy ? (
-              <ActivityIndicator size="small" color="white" />
-            ) : (
-              <Ionicons
-                name={isRecording ? "stop" : "mic"}
-                size={18}
-                color="white"
-              />
-            )}
-          </TouchableOpacity>
-        ) : null}
         {hasValue ? (
           <TouchableOpacity
             onPress={onSubmit}
             disabled={isBusy}
-            style={buttonStyle}
+            style={[
+              styles.actionButton,
+              isLoading && styles.actionButtonDisabled,
+            ]}
           >
-            {isBusy ? (
-              <ActivityIndicator size="small" color="white" />
+            {isLoading ? (
+              <ActivityIndicator size="small" color="black" />
             ) : (
               <Ionicons name="arrow-up" color="white" size={18} />
             )}
+          </TouchableOpacity>
+        ) : null}
+
+        {isRecording ? (
+          <TouchableOpacity
+            onPress={onStopAudio}
+            disabled={!canStopAudio}
+            style={[
+              styles.actionButton,
+              styles.actionButtonDanger,
+              // !canStopAudio && styles.actionButtonDisabled,
+            ]}
+          >
+            <Ionicons name="stop" size={18} color="white" />
+          </TouchableOpacity>
+        ) : null}
+
+        {!isRecording && !hasValue ? (
+          <TouchableOpacity
+            onPress={onStartAudio}
+            style={[styles.actionButton]}
+          >
+            <Ionicons name="mic" size={18} color="white" />
           </TouchableOpacity>
         ) : null}
       </View>
