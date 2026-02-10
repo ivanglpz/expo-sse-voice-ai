@@ -128,6 +128,26 @@ const ChatScreen = () => {
     isAssistantAudioStreamOpenRef.current = false;
   }, []);
 
+  const stopAssistantPlayback = useCallback(
+    (applyCooldown = true) => {
+      player.pause();
+      if (currentAudioFileRef.current?.exists) {
+        currentAudioFileRef.current.delete();
+      }
+      currentAudioFileRef.current = null;
+      resetAssistantAudioPipeline();
+
+      if (applyCooldown) {
+        finishAssistantTurn();
+        return;
+      }
+
+      isAssistantPlaybackActiveRef.current = false;
+      isAssistantSpeakingRef.current = false;
+    },
+    [finishAssistantTurn, player, resetAssistantAudioPipeline],
+  );
+
   useEffect(() => {
     setAudioModeAsync({
       allowsRecording: true,
@@ -137,15 +157,9 @@ const ChatScreen = () => {
     }).catch((e) => console.error("[AUDIO] setAudioModeAsync error", e));
 
     return () => {
-      player.pause();
-      if (currentAudioFileRef.current?.exists) {
-        currentAudioFileRef.current.delete();
-      }
-      currentAudioFileRef.current = null;
-      resetAssistantAudioPipeline();
-      finishAssistantTurn();
+      stopAssistantPlayback(true);
     };
-  }, [finishAssistantTurn, player, resetAssistantAudioPipeline]);
+  }, [stopAssistantPlayback]);
 
   const playAssistantAudio = useCallback(
     (audioBytes: Uint8Array) => {
@@ -280,13 +294,7 @@ const ChatScreen = () => {
       }
 
       if (event === "assistant:audio:start") {
-        player.pause();
-        if (currentAudioFileRef.current?.exists) {
-          currentAudioFileRef.current.delete();
-        }
-        currentAudioFileRef.current = null;
-        isAssistantPlaybackActiveRef.current = false;
-        resetAssistantAudioPipeline();
+        stopAssistantPlayback(false);
         isAssistantAudioStreamOpenRef.current = true;
         isAssistantSpeakingRef.current = true;
         return;
@@ -321,8 +329,7 @@ const ChatScreen = () => {
       appendMessage,
       finishAssistantTurn,
       flushIncomingAudioBuffer,
-      player,
-      resetAssistantAudioPipeline,
+      stopAssistantPlayback,
       tryPlayNextAssistantSegment,
     ],
   );
@@ -421,25 +428,21 @@ const ChatScreen = () => {
       return;
     }
 
+    isRecordingRef.current = true;
     setIsRecording(true);
   }, [session.id]);
 
-  const handleStopCall = useCallback(async () => {
+  const handleStopCall = useCallback(() => {
     if (isRecordingRef.current) {
       audioRecorder.stop();
       sendRef.current("audio:stop");
+      isRecordingRef.current = false;
       setIsRecording(false);
       AudioManager.setAudioSessionActivity(false);
     }
 
-    player.pause();
-    if (currentAudioFileRef.current?.exists) {
-      currentAudioFileRef.current.delete();
-    }
-    currentAudioFileRef.current = null;
-    resetAssistantAudioPipeline();
-    finishAssistantTurn();
-  }, [finishAssistantTurn, player, resetAssistantAudioPipeline]);
+    stopAssistantPlayback(true);
+  }, [stopAssistantPlayback]);
 
   useEffect(() => {
     audioRecorder.onAudioReady(
@@ -465,6 +468,17 @@ const ChatScreen = () => {
     };
   }, []);
 
+  const keyExtractor = useCallback((item: Message) => item.id, []);
+
+  const renderMessage = useCallback(
+    ({ item }: { item: Message }) => <CardMessage item={item} />,
+    [],
+  );
+
+  const handleSubmitText = useCallback(() => {
+    sendMessageWithStreaming(text);
+  }, [sendMessageWithStreaming, text]);
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <KeyboardAvoidingView behavior="padding" style={styles.keyboardContainer}>
@@ -485,12 +499,10 @@ const ChatScreen = () => {
           <FlatList
             data={session.messages}
             ref={flatListRef}
-            keyExtractor={(item: Message) => item.id}
+            keyExtractor={keyExtractor}
             contentContainerStyle={styles.listContent}
             onContentSizeChange={scrollToBottom}
-            renderItem={({ item }: { item: Message }) => (
-              <CardMessage item={item} />
-            )}
+            renderItem={renderMessage}
           />
 
           {isStreaming ? (
@@ -502,7 +514,7 @@ const ChatScreen = () => {
           <ChatInput
             value={text}
             onChange={setText}
-            onSubmit={() => sendMessageWithStreaming(text)}
+            onSubmit={handleSubmitText}
             isLoading={isStreaming}
             isRecording={isRecording}
             onStartAudio={handleStartCall}
