@@ -44,3 +44,4 @@ yarn-error.*
 modules/expo-speech-to-text/android/build/
 modules/expo-audio-stream/android/build/
 .env
+.agents
