@@ -35,7 +35,7 @@ import { UUID } from "../../utils/uuid";
 
 AudioManager.setAudioSessionOptions({
   iosCategory: "playAndRecord",
-  iosMode: "default",
+  iosMode: "voiceChat", // mejor AEC que "default"
   iosOptions: [],
 });
 
@@ -44,6 +44,7 @@ const audioRecorder = new AudioRecorder();
 const sampleRate = 16000;
 const bufferLength = Math.floor(sampleRate * 0.02);
 const channelCount = 1;
+const MIC_RESUME_COOLDOWN_MS = 350;
 
 const float32ToInt16 = (input: Float32Array) => {
   const out = new Int16Array(input.length);
@@ -54,13 +55,38 @@ const float32ToInt16 = (input: Float32Array) => {
   return out;
 };
 
-const base64ToBytes = (base64: string): Uint8Array => {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
+const toUint8Array = (value: unknown): Uint8Array | null => {
+  if (value instanceof Uint8Array) return value;
+  if (value instanceof ArrayBuffer) return new Uint8Array(value);
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
   }
-  return bytes;
+  if (Array.isArray(value) && value.every((n) => typeof n === "number")) {
+    return new Uint8Array(value);
+  }
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "data" in value &&
+    Array.isArray((value as { data: unknown }).data)
+  ) {
+    const raw = (value as { data: unknown[] }).data;
+    if (raw.every((n) => typeof n === "number")) {
+      return new Uint8Array(raw as number[]);
+    }
+  }
+  return null;
+};
+
+const concatChunks = (chunks: Uint8Array[]) => {
+  const total = chunks.reduce((sum, c) => sum + c.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return out;
 };
 
 const Index = () => {
@@ -84,6 +110,10 @@ const Index = () => {
   const playerStatus = useAudioPlayerStatus(player);
   const currentAudioFileRef = useRef<File | null>(null);
 
+  const incomingAudioChunksRef = useRef<Uint8Array[]>([]);
+  const isAssistantSpeakingRef = useRef(false);
+  const resumeMicAtRef = useRef(0);
+
   if (!params.id || !session) {
     return <Redirect href="/" />;
   }
@@ -104,6 +134,8 @@ const Index = () => {
         currentAudioFileRef.current.delete();
       }
       currentAudioFileRef.current = null;
+      incomingAudioChunksRef.current = [];
+      isAssistantSpeakingRef.current = false;
     };
   }, [player]);
 
@@ -116,11 +148,11 @@ const Index = () => {
     currentAudioFileRef.current = null;
   }, [playerStatus?.didJustFinish]);
 
-  const playAssistantAudio = async (audioBase64: string) => {
+  const playAssistantAudio = async (audioBytes: Uint8Array) => {
     try {
       const nextFile = new File(Paths.cache, `assistant-${Date.now()}.mp3`);
       nextFile.create({ overwrite: true });
-      nextFile.write(base64ToBytes(audioBase64));
+      nextFile.write(audioBytes);
 
       const previous = currentAudioFileRef.current;
       currentAudioFileRef.current = nextFile;
@@ -256,19 +288,37 @@ const Index = () => {
         return;
       }
 
-      if (event === "assistant:audio") {
-        const audioBase64 =
-          typeof data === "object" && data !== null && "audioBase64" in data
-            ? String((data as any).audioBase64 ?? "")
-            : "";
+      if (event === "assistant:audio:start") {
+        isAssistantSpeakingRef.current = true;
+        incomingAudioChunksRef.current = [];
+        return;
+      }
 
-        if (audioBase64) {
-          await playAssistantAudio(audioBase64);
+      if (event === "assistant:audio:chunk") {
+        const chunk = toUint8Array(data);
+        if (chunk && chunk.length > 0) {
+          incomingAudioChunksRef.current.push(chunk);
         }
         return;
       }
 
+      if (event === "assistant:audio:end") {
+        const fullAudio = concatChunks(incomingAudioChunksRef.current);
+        incomingAudioChunksRef.current = [];
+        if (fullAudio.length > 0) {
+          await playAssistantAudio(fullAudio);
+        }
+
+        isAssistantSpeakingRef.current = false;
+        resumeMicAtRef.current = Date.now() + MIC_RESUME_COOLDOWN_MS;
+        return;
+      }
+
       if (event === "assistant:error") {
+        incomingAudioChunksRef.current = [];
+        isAssistantSpeakingRef.current = false;
+        resumeMicAtRef.current = Date.now() + MIC_RESUME_COOLDOWN_MS;
+
         const message =
           typeof data === "object" && data !== null && "message" in data
             ? String((data as any).message ?? "Error de voz")
@@ -283,7 +333,7 @@ const Index = () => {
       disconnect?.();
       audioRecorder.clearOnAudioReady();
     };
-  }, [disconnect]);
+  }, []);
 
   const handleStartCall = async () => {
     if (isRecording || !isConnected) return;
@@ -321,6 +371,9 @@ const Index = () => {
       { sampleRate, bufferLength, channelCount },
       ({ buffer }) => {
         if (!isRecording || !isConnected) return;
+        if (isAssistantSpeakingRef.current) return;
+        if (Date.now() < resumeMicAtRef.current) return;
+
         const mono = buffer.getChannelData(0);
         const pcm16 = float32ToInt16(mono);
         send("audio:chunk", new Uint8Array(pcm16.buffer));
@@ -330,7 +383,7 @@ const Index = () => {
     return () => {
       audioRecorder.clearOnAudioReady();
     };
-  }, [isRecording, isConnected, send]);
+  }, [isRecording, isConnected]);
 
   return (
     <SafeAreaView style={{ flex: 1 }}>
