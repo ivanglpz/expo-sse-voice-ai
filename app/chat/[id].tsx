@@ -126,6 +126,7 @@ const ChatScreen = () => {
 
   const incomingAudioChunksRef = useRef<Uint8Array[]>([]);
   const isAssistantSpeakingRef = useRef(false);
+  const isAssistantPlaybackActiveRef = useRef(false);
   const resumeMicAtRef = useRef(0);
   const isRecordingRef = useRef(isRecording);
   const isConnectedRef = useRef(false);
@@ -175,6 +176,7 @@ const ChatScreen = () => {
       }
       currentAudioFileRef.current = null;
       incomingAudioChunksRef.current = [];
+      isAssistantPlaybackActiveRef.current = false;
       isAssistantSpeakingRef.current = false;
     };
   }, [player]);
@@ -186,11 +188,17 @@ const ChatScreen = () => {
       finishedFile.delete();
     }
     currentAudioFileRef.current = null;
+    isAssistantPlaybackActiveRef.current = false;
+    isAssistantSpeakingRef.current = false;
+    resumeMicAtRef.current = Date.now() + MIC_RESUME_COOLDOWN_MS;
   }, [playerStatus?.didJustFinish]);
 
   const playAssistantAudio = useCallback(
     async (audioBytes: Uint8Array) => {
       try {
+        isAssistantPlaybackActiveRef.current = true;
+        isAssistantSpeakingRef.current = true;
+
         const nextFile = new File(Paths.cache, `assistant-${Date.now()}.mp3`);
         nextFile.create({ overwrite: true });
         nextFile.write(audioBytes);
@@ -206,6 +214,9 @@ const ChatScreen = () => {
           previous.delete();
         }
       } catch (error) {
+        isAssistantPlaybackActiveRef.current = false;
+        isAssistantSpeakingRef.current = false;
+        resumeMicAtRef.current = Date.now() + MIC_RESUME_COOLDOWN_MS;
         console.error("[VOICE] Error reproduciendo audio IA:", error);
       }
     },
@@ -282,14 +293,16 @@ const ChatScreen = () => {
         incomingAudioChunksRef.current = [];
         if (fullAudio.length > 0) {
           await playAssistantAudio(fullAudio);
+          return;
         }
+        isAssistantPlaybackActiveRef.current = false;
         isAssistantSpeakingRef.current = false;
         resumeMicAtRef.current = Date.now() + MIC_RESUME_COOLDOWN_MS;
-        return;
       }
 
       if (event === "assistant:error") {
         incomingAudioChunksRef.current = [];
+        isAssistantPlaybackActiveRef.current = false;
         isAssistantSpeakingRef.current = false;
         resumeMicAtRef.current = Date.now() + MIC_RESUME_COOLDOWN_MS;
         const message = readStringField(data, "message") || ASSISTANT_VOICE_ERROR;
@@ -407,7 +420,12 @@ const ChatScreen = () => {
       { sampleRate, bufferLength, channelCount },
       ({ buffer }) => {
         if (!isRecordingRef.current || !isConnectedRef.current) return;
-        if (isAssistantSpeakingRef.current) return;
+        if (
+          isAssistantSpeakingRef.current ||
+          isAssistantPlaybackActiveRef.current
+        ) {
+          return;
+        }
         if (Date.now() < resumeMicAtRef.current) return;
 
         const mono = buffer.getChannelData(0);
