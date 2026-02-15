@@ -1,4 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { LegendList, LegendListRef } from "@legendapp/list";
 import {
   setAudioModeAsync,
   useAudioPlayer,
@@ -10,7 +11,6 @@ import { atom, useAtomValue, useSetAtom } from "jotai";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
-  FlatList,
   KeyboardAvoidingView,
   Pressable,
   StyleSheet,
@@ -69,7 +69,7 @@ const ChatScreen = () => {
   const GET_CONTEXT = useSetAtom(GET_HISTORY_CHAT);
   const UPDATE_MESSAGE = useSetAtom(UPDATE_MESSAGE_ATOM);
 
-  const flatListRef = useRef<FlatList<Message>>(null);
+  const flatListRef = useRef<LegendListRef>(null);
   const currentAIMessageId = useRef<string | null>(null);
 
   const player = useAudioPlayer();
@@ -497,15 +497,25 @@ const ChatScreen = () => {
             </View>
             <View style={styles.headerAction} />
           </View>
-
-          <FlatList
+          <LegendList
+            // Required Props
+            data={session.messages}
+            renderItem={renderMessage}
+            // Recommended props (Improves performance)
+            keyExtractor={(item) => item.id}
+            recycleItems={true}
+            // Recommended if data can change
+            maintainVisibleContentPosition
+            ref={flatListRef}
+          />
+          {/* <FlatList
             data={session.messages}
             ref={flatListRef}
             keyExtractor={keyExtractor}
             contentContainerStyle={styles.listContent}
             onContentSizeChange={scrollToBottom}
             renderItem={renderMessage}
-          />
+          /> */}
 
           {isStreaming ? (
             <View style={styles.streamingBanner}>
