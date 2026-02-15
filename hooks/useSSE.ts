@@ -21,7 +21,7 @@ export const useSSEStream = (options: UseSSEStreamOptions) => {
 
   const [isStreaming, setIsStreaming] = useState(false);
   const eventSourceRef = useRef<any>(null);
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const timeoutRef = useRef<number | null>(null);
 
   const clearStreamTimeout = useCallback(() => {
     if (timeoutRef.current) {

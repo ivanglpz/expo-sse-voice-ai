@@ -23,7 +23,6 @@ import { CardMessage } from "../../components/CardMessage";
 import { ChatInput } from "../../components/ChatInput";
 import { CONFIG } from "../../config/config";
 import { useSSEStream } from "../../hooks/useSSE";
-import { useSocketIO } from "../../hooks/useWebSocket";
 import {
   CHATS_ATOM,
   CREATE_MESSAGE_ATOM,
@@ -258,6 +257,8 @@ const ChatScreen = () => {
   );
 
   const onStreamError = useCallback(() => {
+    console.log("error en el chat sse");
+
     if (currentAIMessageId.current) {
       DELETE_MESSAGE({
         chatId: session.id,
@@ -269,11 +270,12 @@ const ChatScreen = () => {
   }, [DELETE_MESSAGE, session.id]);
 
   const onStreamClose = useCallback(() => {
+    console.log("SSE Connection closed");
     currentAIMessageId.current = null;
   }, []);
 
   const { isStreaming, startStream } = useSSEStream({
-    url: `${CONFIG.API_URL}/chat`,
+    url: `${CONFIG.API_URL}/chats/cmlo8udpx0000hmbsjikcylef/stream`,
     onMessage: onStreamMessage,
     onError: onStreamError,
     onOpen: () => console.log("SSE Connection opened"),
@@ -334,36 +336,36 @@ const ChatScreen = () => {
     ],
   );
 
-  const { send, disconnect, isConnected } = useSocketIO<unknown>(
-    CONFIG.API_URL,
-    {
-      autoConnect: true,
-      onConnect: () =>
-        console.log(`🟢 Socket.IO connected for ${CONFIG.API_URL}`),
-      onDisconnect: () => {},
-      onError: () => {},
-      onMessage: onSocketMessage,
-    },
-  );
+  // const { send, disconnect, isConnected } = useSocketIO<unknown>(
+  //   CONFIG.API_URL,
+  //   {
+  //     autoConnect: true,
+  //     onConnect: () =>
+  //       console.log(`🟢 Socket.IO connected for ${CONFIG.API_URL}`),
+  //     onDisconnect: () => {},
+  //     onError: () => {},
+  //     onMessage: onSocketMessage,
+  //   },
+  // );
 
-  useEffect(() => {
-    isRecordingRef.current = isRecording;
-  }, [isRecording]);
+  // useEffect(() => {
+  //   isRecordingRef.current = isRecording;
+  // }, [isRecording]);
 
-  useEffect(() => {
-    isConnectedRef.current = isConnected;
-  }, [isConnected]);
+  // useEffect(() => {
+  //   isConnectedRef.current = isConnected;
+  // }, [isConnected]);
 
-  useEffect(() => {
-    sendRef.current = send;
-  }, [send]);
+  // useEffect(() => {
+  //   sendRef.current = send;
+  // }, [send]);
 
-  useEffect(() => {
-    return () => {
-      disconnect();
-      audioRecorder.clearOnAudioReady();
-    };
-  }, [disconnect]);
+  // useEffect(() => {
+  //   return () => {
+  //     disconnect();
+  //     audioRecorder.clearOnAudioReady();
+  //   };
+  // }, [disconnect]);
 
   const sendMessageWithStreaming = useCallback(
     async (userText: string) => {
