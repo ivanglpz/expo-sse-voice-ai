@@ -1,6 +1,6 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { LegendList, LegendListRef } from "@legendapp/list";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import {
   setAudioModeAsync,
   useAudioPlayer,
@@ -8,9 +8,9 @@ import {
 } from "expo-audio";
 import { File, Paths } from "expo-file-system";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useSetAtom } from "jotai";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Pressable,
@@ -24,8 +24,7 @@ import { CardMessage } from "../../components/CardMessage";
 import { ChatInput } from "../../components/ChatInput";
 import { CONFIG } from "../../config/config";
 import { useSSEStream } from "../../hooks/useSSE";
-import { fetchListMessagesFromChat } from "../../service/chats";
-import { GET_HISTORY_CHAT, Message } from "../../state/chat";
+import { MessageChat, fetchListMessagesFromChat } from "../../service/chats";
 import { UUID } from "../../utils/uuid";
 import { concatChunks, float32ToInt16, toUint8Array } from "./utils/audio";
 import { readStringField } from "./utils/payload";
@@ -45,6 +44,7 @@ const MIC_RESUME_COOLDOWN_MS = 350;
 const ASSISTANT_AUDIO_MIN_SEGMENT_BYTES = 24 * 1024;
 
 const ASSISTANT_VOICE_ERROR = "Error de voz";
+const DEFAULT_MESSAGES_LIMIT = 20;
 
 const ChatScreen = () => {
   const router = useRouter();
@@ -52,18 +52,23 @@ const ChatScreen = () => {
   const [isRecording, setIsRecording] = useState(false);
   const [text, setText] = useState("");
 
-  const chatId = params.id;
-  const query = useQuery({
-    queryKey: [chatId],
-    queryFn: async () => await fetchListMessagesFromChat(chatId),
-    enabled: chatId !== null,
+  const chatId = typeof params.id === "string" ? params.id : "";
+  const messagesQuery = useInfiniteQuery({
+    queryKey: ["chat-messages", chatId],
+    queryFn: async ({ pageParam }) =>
+      await fetchListMessagesFromChat(chatId, {
+        page: pageParam,
+        limit: DEFAULT_MESSAGES_LIMIT,
+      }),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage) =>
+      lastPage.page < lastPage.totalPages ? lastPage.page + 1 : undefined,
+    enabled: chatId.length > 0,
   });
-  console.log(query?.data);
 
-  // const CREATE_MESSAGE = useSetAtom(CREATE_MESSAGE_ATOM);
-  // const DELETE_MESSAGE = useSetAtom(DELETE_MESSAGE_ATOM);
-  const GET_CONTEXT = useSetAtom(GET_HISTORY_CHAT);
-  // const UPDATE_MESSAGE = useSetAtom(UPDATE_MESSAGE_ATOM);
+  const messages = Array.isArray(messagesQuery.data?.pages)
+    ? messagesQuery.data?.pages?.flatMap((e) => e?.messages)
+    : [];
 
   const flatListRef = useRef<LegendListRef>(null);
   const currentAIMessageId = useRef<string | null>(null);
@@ -88,7 +93,7 @@ const ChatScreen = () => {
   }, []);
 
   const appendMessage = useCallback(
-    (type: Message["type"], rawText: string) => {
+    (type: MessageChat["type"], rawText: string) => {
       const messageText = rawText.trim();
       if (!messageText) return;
 
@@ -373,7 +378,7 @@ const ChatScreen = () => {
       setText("");
       appendMessage("user", trimmedText);
 
-      // const history = GET_CONTEXT(session.id);
+      // const history = GET_CONTEXT(chatId);
       const aiMessageId = UUID();
       currentAIMessageId.current = aiMessageId;
 
@@ -401,7 +406,7 @@ const ChatScreen = () => {
     //   session.id,
     //   startStream,
     // ],
-    [appendMessage, GET_CONTEXT, scrollToBottom, startStream],
+    [appendMessage, chatId, scrollToBottom, startStream],
   );
 
   const handleStartCall = useCallback(async () => {
@@ -467,16 +472,27 @@ const ChatScreen = () => {
     };
   }, []);
 
-  const keyExtractor = useCallback((item: Message) => item.id, []);
+  const keyExtractor = useCallback((item: MessageChat) => item.id, []);
 
   const renderMessage = useCallback(
-    ({ item }: { item: Message }) => <CardMessage item={item} />,
+    ({ item }: { item: MessageChat }) => <CardMessage item={item} />,
     [],
   );
 
   const handleSubmitText = useCallback(() => {
     sendMessageWithStreaming(text);
   }, [sendMessageWithStreaming, text]);
+
+  const handleLoadMoreMessages = useCallback(() => {
+    if (!messagesQuery.hasNextPage || messagesQuery.isFetchingNextPage) {
+      return;
+    }
+    messagesQuery.fetchNextPage();
+  }, [
+    messagesQuery.fetchNextPage,
+    messagesQuery.hasNextPage,
+    messagesQuery.isFetchingNextPage,
+  ]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -496,7 +512,7 @@ const ChatScreen = () => {
           </View>
           <LegendList
             // Required Props
-            data={[]}
+            data={messages}
             renderItem={renderMessage}
             // Recommended props (Improves performance)
             keyExtractor={keyExtractor}
@@ -504,15 +520,16 @@ const ChatScreen = () => {
             // Recommended if data can change
             maintainVisibleContentPosition
             ref={flatListRef}
+            onEndReached={handleLoadMoreMessages}
+            onEndReachedThreshold={0.3}
+            ListFooterComponent={
+              messagesQuery.isFetchingNextPage ? (
+                <View style={styles.paginationLoader}>
+                  <ActivityIndicator size="small" />
+                </View>
+              ) : null
+            }
           />
-          {/* <FlatList
-            data={session.messages}
-            ref={flatListRef}
-            keyExtractor={keyExtractor}
-            contentContainerStyle={styles.listContent}
-            onContentSizeChange={scrollToBottom}
-            renderItem={renderMessage}
-          /> */}
 
           {isStreaming ? (
             <View style={styles.streamingBanner}>
@@ -571,6 +588,10 @@ const styles = StyleSheet.create({
   },
   listContent: {
     paddingVertical: 12,
+  },
+  paginationLoader: {
+    paddingVertical: 12,
+    alignItems: "center",
   },
   streamingBanner: {
     flexDirection: "row",

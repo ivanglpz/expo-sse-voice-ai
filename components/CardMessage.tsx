@@ -1,10 +1,8 @@
-import { useAtomValue } from "jotai";
 import { Text, View } from "react-native";
-import { Message } from "../state/chat";
+import { MessageChat } from "../service/chats";
 
-export const CardMessage = ({ item }: { item: Message }) => {
+export const CardMessage = ({ item }: { item: MessageChat }) => {
   const isUser = item.type === "user";
-  const text = useAtomValue(item.text);
   return (
     <View
       style={{
@@ -24,10 +22,12 @@ export const CardMessage = ({ item }: { item: Message }) => {
           borderRadius: 12,
         }}
       >
-        <Text style={{ color: isUser ? "#ffffff" : "#333" }}>{text}</Text>
+        <Text style={{ color: isUser ? "#ffffff" : "#333" }}>
+          {item.content}
+        </Text>
       </View>
       <Text style={{ fontSize: 12, opacity: 0.5 }}>
-        {new Date(item.timestamp).toLocaleTimeString()}
+        {new Date(item.createdAt).toLocaleTimeString()}
       </Text>
     </View>
   );

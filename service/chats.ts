@@ -14,7 +14,7 @@ export const fetchListChats = async (): Promise<Chat[]> => {
 export type MessageChat = {
   id: string;
   chatId: string;
-  type: "user";
+  type: "user" | "ai" | "assistant" | "transcription" | "ai_response" | "error";
   content: string;
   createdAt: string;
 };
@@ -28,9 +28,21 @@ export type ListMessagesPagination = {
 };
 export const fetchListMessagesFromChat = async (
   chatId: string,
+  params?: {
+    page?: number;
+    limit?: number;
+  },
 ): Promise<ListMessagesPagination> => {
+  const queryParams = {
+    page: params?.page ?? 1,
+    limit: params?.limit ?? 20,
+  };
+
   const response = await api.get<ListMessagesPagination>(
     `/chats/${chatId}/messages`,
+    {
+      params: queryParams,
+    },
   );
   return response.data;
 };
