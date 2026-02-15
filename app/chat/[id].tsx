@@ -53,6 +53,8 @@ const ChatScreen = () => {
   const [text, setText] = useState("");
 
   const chatId = typeof params.id === "string" ? params.id : "";
+  console.log(chatId);
+
   const messagesQuery = useInfiniteQuery({
     queryKey: ["chat-messages", chatId],
     queryFn: async ({ pageParam }) =>
