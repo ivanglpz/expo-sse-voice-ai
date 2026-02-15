@@ -1,22 +1,37 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
-import { useAtomValue, useSetAtom } from "jotai";
-import { FlatList, Text, TouchableOpacity, View } from "react-native";
+import {
+  ActivityIndicator,
+  FlatList,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ChatItem } from "../components/Chat";
-import { CHATS_ATOM, CREATE_CHAT_ATOM } from "../state/chat";
+import { api } from "../service/axios";
+import { fetchListChats } from "../service/chats";
 
 const Index = () => {
-  const listChats = useAtomValue(CHATS_ATOM);
-  const createChat = useSetAtom(CREATE_CHAT_ATOM);
   const router = useRouter();
+  const query = useQuery({
+    queryKey: ["list-chats"],
+    queryFn: async () => await fetchListChats(),
+  });
 
-  const handleCreate = async () => {
-    const newSessionId = await createChat();
-    router.push(`/chat/${newSessionId}`);
-  };
+  const mutate = useMutation({
+    mutationFn: async () => {
+      await api.post("/chats", {
+        title: `Chat #${Number(query?.data?.length) + 1}`,
+      });
+    },
+    onSuccess: () => {
+      query.refetch();
+    },
+  });
 
-  if (listChats.length === 0) {
+  if (query?.data?.length === 0) {
     return (
       <SafeAreaView style={{ flex: 1 }}>
         <View
@@ -58,7 +73,7 @@ const Index = () => {
             </Text>
 
             <TouchableOpacity
-              onPress={handleCreate}
+              onPress={() => mutate.mutate()}
               style={{
                 backgroundColor: "#111827",
                 paddingVertical: 14,
@@ -102,7 +117,7 @@ const Index = () => {
           <Text style={{ fontWeight: "bold", fontSize: 28 }}>Chats</Text>
 
           <TouchableOpacity
-            onPress={handleCreate}
+            onPress={() => mutate.mutate()}
             style={{
               backgroundColor: "#e2e8f0",
               width: 48,
@@ -113,12 +128,16 @@ const Index = () => {
               marginTop: 12,
             }}
           >
-            <Ionicons name="add" size={32} color="black" />
+            {mutate?.isPending ? (
+              <ActivityIndicator size={18} color={"black"} />
+            ) : (
+              <Ionicons name="add" size={32} color="black" />
+            )}
           </TouchableOpacity>
         </View>
 
         <FlatList
-          data={listChats}
+          data={query?.data}
           keyExtractor={(item) => item.id}
           ItemSeparatorComponent={() => <View style={{ height: 15 }} />}
           renderItem={({ item }) => {

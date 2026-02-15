@@ -1,14 +1,15 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { LegendList, LegendListRef } from "@legendapp/list";
+import { useQuery } from "@tanstack/react-query";
 import {
   setAudioModeAsync,
   useAudioPlayer,
   useAudioPlayerStatus,
 } from "expo-audio";
 import { File, Paths } from "expo-file-system";
-import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
-import { atom, useAtomValue, useSetAtom } from "jotai";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { useSetAtom } from "jotai";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -23,14 +24,8 @@ import { CardMessage } from "../../components/CardMessage";
 import { ChatInput } from "../../components/ChatInput";
 import { CONFIG } from "../../config/config";
 import { useSSEStream } from "../../hooks/useSSE";
-import {
-  CHATS_ATOM,
-  CREATE_MESSAGE_ATOM,
-  DELETE_MESSAGE_ATOM,
-  GET_HISTORY_CHAT,
-  Message,
-  UPDATE_MESSAGE_ATOM,
-} from "../../state/chat";
+import { fetchListMessagesFromChat } from "../../service/chats";
+import { GET_HISTORY_CHAT, Message } from "../../state/chat";
 import { UUID } from "../../utils/uuid";
 import { concatChunks, float32ToInt16, toUint8Array } from "./utils/audio";
 import { readStringField } from "./utils/payload";
@@ -57,17 +52,18 @@ const ChatScreen = () => {
   const [isRecording, setIsRecording] = useState(false);
   const [text, setText] = useState("");
 
-  const LIST_SESSIONS = useAtomValue(CHATS_ATOM);
   const chatId = params.id;
-  const session = useMemo(
-    () => LIST_SESSIONS.find((candidate) => candidate.id === chatId),
-    [LIST_SESSIONS, chatId],
-  );
+  const query = useQuery({
+    queryKey: [chatId],
+    queryFn: async () => await fetchListMessagesFromChat(chatId),
+    enabled: chatId !== null,
+  });
+  console.log(query?.data);
 
-  const CREATE_MESSAGE = useSetAtom(CREATE_MESSAGE_ATOM);
-  const DELETE_MESSAGE = useSetAtom(DELETE_MESSAGE_ATOM);
+  // const CREATE_MESSAGE = useSetAtom(CREATE_MESSAGE_ATOM);
+  // const DELETE_MESSAGE = useSetAtom(DELETE_MESSAGE_ATOM);
   const GET_CONTEXT = useSetAtom(GET_HISTORY_CHAT);
-  const UPDATE_MESSAGE = useSetAtom(UPDATE_MESSAGE_ATOM);
+  // const UPDATE_MESSAGE = useSetAtom(UPDATE_MESSAGE_ATOM);
 
   const flatListRef = useRef<LegendListRef>(null);
   const currentAIMessageId = useRef<string | null>(null);
@@ -87,10 +83,6 @@ const ChatScreen = () => {
   const isConnectedRef = useRef(false);
   const sendRef = useRef<(event: string, data?: unknown) => void>(() => {});
 
-  if (!chatId || !session) {
-    return <Redirect href="/" />;
-  }
-
   const scrollToBottom = useCallback(() => {
     flatListRef.current?.scrollToEnd({ animated: false });
   }, []);
@@ -100,18 +92,19 @@ const ChatScreen = () => {
       const messageText = rawText.trim();
       if (!messageText) return;
 
-      CREATE_MESSAGE({
-        chatId: session.id,
-        message: {
-          id: UUID(),
-          type,
-          text: atom(messageText),
-          timestamp: Date.now(),
-        },
-      });
+      // CREATE_MESSAGE({
+      //   chatId: session.id,
+      //   message: {
+      //     id: UUID(),
+      //     type,
+      //     text: atom(messageText),
+      //     timestamp: Date.now(),
+      //   },
+      // });
       scrollToBottom();
     },
-    [CREATE_MESSAGE, scrollToBottom, session.id],
+    // [CREATE_MESSAGE, scrollToBottom, session.id],
+    [],
   );
 
   const finishAssistantTurn = useCallback(() => {
@@ -129,7 +122,7 @@ const ChatScreen = () => {
 
   const stopAssistantPlayback = useCallback(
     (applyCooldown = true) => {
-      player.pause();
+      // player.pause();
       if (currentAudioFileRef.current?.exists) {
         currentAudioFileRef.current.delete();
       }
@@ -246,28 +239,30 @@ const ChatScreen = () => {
       if (!data.content || !currentAIMessageId.current) {
         return;
       }
-      UPDATE_MESSAGE({
-        sessionId: session.id,
-        messageId: currentAIMessageId.current,
-        newText: data.content,
-      });
-      scrollToBottom();
+      // UPDATE_MESSAGE({
+      //   sessionId: session.id,
+      //   messageId: currentAIMessageId.current,
+      //   newText: data.content,
+      // });
+      // scrollToBottom();
     },
-    [UPDATE_MESSAGE, scrollToBottom, session.id],
+    // [UPDATE_MESSAGE, scrollToBottom, session.id],
+    [],
   );
 
   const onStreamError = useCallback(() => {
     console.log("error en el chat sse");
 
     if (currentAIMessageId.current) {
-      DELETE_MESSAGE({
-        chatId: session.id,
-        messageId: currentAIMessageId.current,
-      });
+      // DELETE_MESSAGE({
+      //   chatId: session.id,
+      //   messageId: currentAIMessageId.current,
+      // });
       Alert.alert("Error", "Failed to get AI response");
     }
     currentAIMessageId.current = null;
-  }, [DELETE_MESSAGE, session.id]);
+    // }, [DELETE_MESSAGE, session.id]);
+  }, []);
 
   const onStreamClose = useCallback(() => {
     console.log("SSE Connection closed");
@@ -275,7 +270,7 @@ const ChatScreen = () => {
   }, []);
 
   const { isStreaming, startStream } = useSSEStream({
-    url: `${CONFIG.API_URL}/chats/cmlo8udpx0000hmbsjikcylef/stream`,
+    url: `${CONFIG.API_URL}/chats/${chatId}/stream`,
     onMessage: onStreamMessage,
     onError: onStreamError,
     onOpen: () => console.log("SSE Connection opened"),
@@ -378,19 +373,19 @@ const ChatScreen = () => {
       setText("");
       appendMessage("user", trimmedText);
 
-      const history = GET_CONTEXT(session.id);
+      // const history = GET_CONTEXT(session.id);
       const aiMessageId = UUID();
       currentAIMessageId.current = aiMessageId;
 
-      CREATE_MESSAGE({
-        chatId: session.id,
-        message: {
-          id: aiMessageId,
-          type: "ai",
-          text: atom(""),
-          timestamp: Date.now(),
-        },
-      });
+      // CREATE_MESSAGE({
+      //   chatId: session.id,
+      //   message: {
+      //     id: aiMessageId,
+      //     type: "ai",
+      //     text: atom(""),
+      //     timestamp: Date.now(),
+      //   },
+      // });
       scrollToBottom();
 
       startStream({
@@ -398,14 +393,15 @@ const ChatScreen = () => {
         body: { message: trimmedText, history },
       });
     },
-    [
-      appendMessage,
-      CREATE_MESSAGE,
-      GET_CONTEXT,
-      scrollToBottom,
-      session.id,
-      startStream,
-    ],
+    // [
+    //   appendMessage,
+    //   CREATE_MESSAGE,
+    //   GET_CONTEXT,
+    //   scrollToBottom,
+    //   session.id,
+    //   startStream,
+    // ],
+    [appendMessage, GET_CONTEXT, scrollToBottom, startStream],
   );
 
   const handleStartCall = useCallback(async () => {
@@ -417,12 +413,12 @@ const ChatScreen = () => {
     const success = await AudioManager.setAudioSessionActivity(true);
     if (!success) return;
 
-    sendRef.current("audio:start", {
-      chatId: session.id,
-      sampleRate: 16000,
-      channels: 1,
-      encoding: "pcm_s16le",
-    });
+    // sendRef.current("audio:start", {
+    //   chatId: session.id,
+    //   sampleRate: 16000,
+    //   channels: 1,
+    //   encoding: "pcm_s16le",
+    // });
 
     const result = audioRecorder.start();
     if (result.status === "error") {
@@ -432,7 +428,8 @@ const ChatScreen = () => {
 
     isRecordingRef.current = true;
     setIsRecording(true);
-  }, [session.id]);
+    // }, [session.id]);
+  }, []);
 
   const handleStopCall = useCallback(() => {
     if (isRecordingRef.current) {
@@ -493,16 +490,16 @@ const ChatScreen = () => {
             </View>
             <View style={styles.headerTitle}>
               <Text style={styles.title}>Chat</Text>
-              <Text style={styles.subtitle}>{session.id}</Text>
+              <Text style={styles.subtitle}>{chatId}</Text>
             </View>
             <View style={styles.headerAction} />
           </View>
           <LegendList
             // Required Props
-            data={session.messages}
+            data={[]}
             renderItem={renderMessage}
             // Recommended props (Improves performance)
-            keyExtractor={(item) => item.id}
+            keyExtractor={keyExtractor}
             recycleItems={true}
             // Recommended if data can change
             maintainVisibleContentPosition
