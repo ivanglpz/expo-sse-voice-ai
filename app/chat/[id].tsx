@@ -69,6 +69,7 @@ const ChatScreen = () => {
   const messages = Array.isArray(messagesQuery.data?.pages)
     ? messagesQuery.data?.pages?.flatMap((e) => e?.messages)
     : [];
+  console.log(messagesQuery.data?.pages?.length);
 
   const flatListRef = useRef<LegendListRef>(null);
   const currentAIMessageId = useRef<string | null>(null);
@@ -89,7 +90,7 @@ const ChatScreen = () => {
   const sendRef = useRef<(event: string, data?: unknown) => void>(() => {});
 
   const scrollToBottom = useCallback(() => {
-    flatListRef.current?.scrollToEnd({ animated: false });
+    flatListRef.current?.scrollToOffset?.({ offset: 0, animated: false });
   }, []);
 
   const appendMessage = useCallback(
@@ -517,7 +518,11 @@ const ChatScreen = () => {
             // Recommended props (Improves performance)
             keyExtractor={keyExtractor}
             recycleItems={true}
-            // Recommended if data can change
+            // Recommended if data can cha
+            // nge
+            alignItemsAtEnd
+            maintainScrollAtEnd
+            maintainScrollAtEndThreshold={0.1}
             maintainVisibleContentPosition
             ref={flatListRef}
             onEndReached={handleLoadMoreMessages}
