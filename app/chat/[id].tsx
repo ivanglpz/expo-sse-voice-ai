@@ -1,6 +1,6 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { LegendList, LegendListRef } from "@legendapp/list";
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import {
   setAudioModeAsync,
   useAudioPlayer,
@@ -24,7 +24,11 @@ import { CardMessage } from "../../components/CardMessage";
 import { ChatInput } from "../../components/ChatInput";
 import { CONFIG } from "../../config/config";
 import { useSSEStream } from "../../hooks/useSSE";
-import { MessageChat, fetchListMessagesFromChat } from "../../service/chats";
+import {
+  MessageChat,
+  fetchChatMetadata,
+  fetchListMessagesFromChat,
+} from "../../service/chats";
 import { UUID } from "../../utils/uuid";
 import { concatChunks, float32ToInt16, toUint8Array } from "./utils/audio";
 import { readStringField } from "./utils/payload";
@@ -53,7 +57,12 @@ const ChatScreen = () => {
   const [text, setText] = useState("");
 
   const chatId = typeof params.id === "string" ? params.id : "";
-  console.log(chatId);
+  const queryMeta = useQuery({
+    queryKey: ["chat-messages-meta", chatId],
+
+    queryFn: async () => await fetchChatMetadata(chatId),
+  });
+  const totalPages = queryMeta.data?.totalPages ?? 0;
 
   const messagesQuery = useInfiniteQuery({
     queryKey: ["chat-messages", chatId],
@@ -61,17 +70,18 @@ const ChatScreen = () => {
       await fetchListMessagesFromChat(chatId, {
         page: pageParam,
         limit: DEFAULT_MESSAGES_LIMIT,
+        order: "desc",
       }),
+    // ✅ CAMBIO: Empezar desde la página 1 (mensajes más recientes)
     initialPageParam: 1,
+    // ✅ CAMBIO: Ir hacia adelante para cargar mensajes más antiguos
     getNextPageParam: (lastPage) =>
-      lastPage.page < lastPage.totalPages ? lastPage.page + 1 : undefined,
+      lastPage.page < totalPages ? lastPage.page + 1 : undefined,
     enabled: chatId.length > 0,
   });
-
   const messages = Array.isArray(messagesQuery.data?.pages)
     ? messagesQuery.data?.pages?.flatMap((e) => e?.messages)
     : [];
-  console.log(messagesQuery.data?.pages?.length);
 
   const flatListRef = useRef<LegendListRef>(null);
   const currentAIMessageId = useRef<string | null>(null);
@@ -514,22 +524,17 @@ const ChatScreen = () => {
             <View style={styles.headerAction} />
           </View>
           <LegendList
-            // Required Props
             data={messages}
             renderItem={renderMessage}
-            // Recommended props (Improves performance)
             keyExtractor={keyExtractor}
             recycleItems={true}
-            // Recommended if data can cha
-            // nge
-            alignItemsAtEnd
-            maintainScrollAtEnd
-            maintainScrollAtEndThreshold={0.1}
-            maintainVisibleContentPosition
+            maintainScrollAtEnd={true}
+            // ✅ CAMBIO: inverted para que scroll empiece abajo
             ref={flatListRef}
+            // ✅ CAMBIO: onEndReached en vez de onStartReached
             onEndReached={handleLoadMoreMessages}
             onEndReachedThreshold={0.3}
-            ListFooterComponent={
+            ListHeaderComponent={
               messagesQuery.isFetchingNextPage ? (
                 <View style={styles.paginationLoader}>
                   <ActivityIndicator size="small" />
@@ -537,7 +542,6 @@ const ChatScreen = () => {
               ) : null
             }
           />
-
           {isStreaming ? (
             <View style={styles.streamingBanner}>
               <Text style={styles.streamingText}>AI is thinking...</Text>

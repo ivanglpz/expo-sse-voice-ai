@@ -31,11 +31,13 @@ export const fetchListMessagesFromChat = async (
   params?: {
     page?: number;
     limit?: number;
+    order?: "desc" | "asc";
   },
 ): Promise<ListMessagesPagination> => {
   const queryParams = {
     page: params?.page ?? 1,
     limit: params?.limit ?? 20,
+    order: params?.order ?? "desc",
   };
 
   const response = await api.get<ListMessagesPagination>(
@@ -43,6 +45,22 @@ export const fetchListMessagesFromChat = async (
     {
       params: queryParams,
     },
+  );
+  return response.data;
+};
+
+export type ChatMetaData = {
+  chatId: string;
+  limit: number;
+  totalItems: number;
+  totalPages: number;
+};
+
+export const fetchChatMetadata = async (
+  chatId: string,
+): Promise<ChatMetaData> => {
+  const response = await api.get<ChatMetaData>(
+    `/chats/${chatId}/messages/meta`,
   );
   return response.data;
 };
