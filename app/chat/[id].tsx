@@ -35,7 +35,7 @@ import { readStringField } from "./utils/payload";
 
 AudioManager.setAudioSessionOptions({
   iosCategory: "playAndRecord",
-  iosMode: "voiceChat", // mejor AEC que "default"
+  iosMode: "voiceChat",
   iosOptions: [],
 });
 
@@ -53,15 +53,17 @@ const DEFAULT_MESSAGES_LIMIT = 20;
 const ChatScreen = () => {
   const router = useRouter();
   const params = useLocalSearchParams<{ id: string }>();
+
   const [isRecording, setIsRecording] = useState(false);
   const [text, setText] = useState("");
 
   const chatId = typeof params.id === "string" ? params.id : "";
+
   const queryMeta = useQuery({
     queryKey: ["chat-messages-meta", chatId],
-
     queryFn: async () => await fetchChatMetadata(chatId),
   });
+
   const totalPages = queryMeta.data?.totalPages ?? 0;
 
   const messagesQuery = useInfiniteQuery({
@@ -77,15 +79,16 @@ const ChatScreen = () => {
       lastPage.page < totalPages ? lastPage.page + 1 : undefined,
     enabled: chatId.length > 0,
   });
+
   const messages = Array.isArray(messagesQuery.data?.pages)
     ? messagesQuery.data?.pages?.flatMap((e) => e?.messages)
     : [];
 
-  const flatListRef = useRef<LegendListRef>(null);
-  const currentAIMessageId = useRef<string | null>(null);
-
   const player = useAudioPlayer();
   const playerStatus = useAudioPlayerStatus(player);
+
+  const flatListRef = useRef<LegendListRef>(null);
+  const currentAIMessageId = useRef<string | null>(null);
   const currentAudioFileRef = useRef<File | null>(null);
 
   const incomingAudioChunksRef = useRef<Uint8Array[]>([]);
@@ -107,19 +110,8 @@ const ChatScreen = () => {
     (type: MessageChat["type"], rawText: string) => {
       const messageText = rawText.trim();
       if (!messageText) return;
-
-      // CREATE_MESSAGE({
-      //   chatId: session.id,
-      //   message: {
-      //     id: UUID(),
-      //     type,
-      //     text: atom(messageText),
-      //     timestamp: Date.now(),
-      //   },
-      // });
       scrollToBottom();
     },
-    // [CREATE_MESSAGE, scrollToBottom, session.id],
     [],
   );
 
@@ -138,7 +130,6 @@ const ChatScreen = () => {
 
   const stopAssistantPlayback = useCallback(
     (applyCooldown = true) => {
-      // player.pause();
       if (currentAudioFileRef.current?.exists) {
         currentAudioFileRef.current.delete();
       }
@@ -153,21 +144,8 @@ const ChatScreen = () => {
       isAssistantPlaybackActiveRef.current = false;
       isAssistantSpeakingRef.current = false;
     },
-    [finishAssistantTurn, player, resetAssistantAudioPipeline],
+    [finishAssistantTurn, resetAssistantAudioPipeline],
   );
-
-  useEffect(() => {
-    setAudioModeAsync({
-      allowsRecording: true,
-      playsInSilentMode: true,
-      interruptionMode: "duckOthers",
-      shouldPlayInBackground: false,
-    }).catch((e) => console.error("[AUDIO] setAudioModeAsync error", e));
-
-    return () => {
-      stopAssistantPlayback(true);
-    };
-  }, [stopAssistantPlayback]);
 
   const playAssistantAudio = useCallback(
     (audioBytes: Uint8Array) => {
@@ -239,45 +217,19 @@ const ChatScreen = () => {
     [tryPlayNextAssistantSegment],
   );
 
-  useEffect(() => {
-    if (!playerStatus?.didJustFinish) return;
-    const finishedFile = currentAudioFileRef.current;
-    if (finishedFile?.exists) {
-      finishedFile.delete();
+  const onStreamMessage = useCallback((data: { content?: string }) => {
+    if (!data.content || !currentAIMessageId.current) {
+      return;
     }
-    currentAudioFileRef.current = null;
-    isAssistantPlaybackActiveRef.current = false;
-    tryPlayNextAssistantSegment();
-  }, [playerStatus?.didJustFinish, tryPlayNextAssistantSegment]);
-
-  const onStreamMessage = useCallback(
-    (data: { content?: string }) => {
-      if (!data.content || !currentAIMessageId.current) {
-        return;
-      }
-      // UPDATE_MESSAGE({
-      //   sessionId: session.id,
-      //   messageId: currentAIMessageId.current,
-      //   newText: data.content,
-      // });
-      // scrollToBottom();
-    },
-    // [UPDATE_MESSAGE, scrollToBottom, session.id],
-    [],
-  );
+  }, []);
 
   const onStreamError = useCallback(() => {
     console.log("error en el chat sse");
 
     if (currentAIMessageId.current) {
-      // DELETE_MESSAGE({
-      //   chatId: session.id,
-      //   messageId: currentAIMessageId.current,
-      // });
       Alert.alert("Error", "Failed to get AI response");
     }
     currentAIMessageId.current = null;
-    // }, [DELETE_MESSAGE, session.id]);
   }, []);
 
   const onStreamClose = useCallback(() => {
@@ -347,39 +299,8 @@ const ChatScreen = () => {
     ],
   );
 
-  // const { send, disconnect, isConnected } = useSocketIO<unknown>(
-  //   CONFIG.API_URL,
-  //   {
-  //     autoConnect: true,
-  //     onConnect: () =>
-  //       console.log(`🟢 Socket.IO connected for ${CONFIG.API_URL}`),
-  //     onDisconnect: () => {},
-  //     onError: () => {},
-  //     onMessage: onSocketMessage,
-  //   },
-  // );
-
-  // useEffect(() => {
-  //   isRecordingRef.current = isRecording;
-  // }, [isRecording]);
-
-  // useEffect(() => {
-  //   isConnectedRef.current = isConnected;
-  // }, [isConnected]);
-
-  // useEffect(() => {
-  //   sendRef.current = send;
-  // }, [send]);
-
-  // useEffect(() => {
-  //   return () => {
-  //     disconnect();
-  //     audioRecorder.clearOnAudioReady();
-  //   };
-  // }, [disconnect]);
-
   const sendMessageWithStreaming = useCallback(
-    async (userText: string) => {
+    (userText: string) => {
       const trimmedText = userText.trim();
       if (!trimmedText) {
         Alert.alert("Error", "Message cannot be empty");
@@ -389,35 +310,17 @@ const ChatScreen = () => {
       setText("");
       appendMessage("user", trimmedText);
 
-      // const history = GET_CONTEXT(chatId);
       const aiMessageId = UUID();
       currentAIMessageId.current = aiMessageId;
 
-      // CREATE_MESSAGE({
-      //   chatId: session.id,
-      //   message: {
-      //     id: aiMessageId,
-      //     type: "ai",
-      //     text: atom(""),
-      //     timestamp: Date.now(),
-      //   },
-      // });
       scrollToBottom();
 
       startStream({
         method: "POST",
-        body: { message: trimmedText, history },
+        body: { message: trimmedText, history: [] },
       });
     },
-    // [
-    //   appendMessage,
-    //   CREATE_MESSAGE,
-    //   GET_CONTEXT,
-    //   scrollToBottom,
-    //   session.id,
-    //   startStream,
-    // ],
-    [appendMessage, chatId, scrollToBottom, startStream],
+    [appendMessage, scrollToBottom, startStream],
   );
 
   const handleStartCall = useCallback(async () => {
@@ -429,13 +332,6 @@ const ChatScreen = () => {
     const success = await AudioManager.setAudioSessionActivity(true);
     if (!success) return;
 
-    // sendRef.current("audio:start", {
-    //   chatId: session.id,
-    //   sampleRate: 16000,
-    //   channels: 1,
-    //   encoding: "pcm_s16le",
-    // });
-
     const result = audioRecorder.start();
     if (result.status === "error") {
       AudioManager.setAudioSessionActivity(false);
@@ -444,7 +340,6 @@ const ChatScreen = () => {
 
     isRecordingRef.current = true;
     setIsRecording(true);
-    // }, [session.id]);
   }, []);
 
   const handleStopCall = useCallback(() => {
@@ -458,6 +353,52 @@ const ChatScreen = () => {
 
     stopAssistantPlayback(true);
   }, [stopAssistantPlayback]);
+
+  const keyExtractor = useCallback((item: MessageChat) => item.id, []);
+
+  const renderMessage = useCallback(
+    ({ item }: { item: MessageChat }) => <CardMessage item={item} />,
+    [],
+  );
+
+  const handleSubmitText = useCallback(() => {
+    sendMessageWithStreaming(text);
+  }, [sendMessageWithStreaming, text]);
+
+  const handleLoadMoreMessages = useCallback(() => {
+    if (!messagesQuery.hasNextPage || messagesQuery.isFetchingNextPage) {
+      return;
+    }
+    messagesQuery.fetchNextPage();
+  }, [
+    messagesQuery.fetchNextPage,
+    messagesQuery.hasNextPage,
+    messagesQuery.isFetchingNextPage,
+  ]);
+
+  useEffect(() => {
+    setAudioModeAsync({
+      allowsRecording: true,
+      playsInSilentMode: true,
+      interruptionMode: "duckOthers",
+      shouldPlayInBackground: false,
+    }).catch((e) => console.error("[AUDIO] setAudioModeAsync error", e));
+
+    return () => {
+      stopAssistantPlayback(true);
+    };
+  }, [stopAssistantPlayback]);
+
+  useEffect(() => {
+    if (!playerStatus?.didJustFinish) return;
+    const finishedFile = currentAudioFileRef.current;
+    if (finishedFile?.exists) {
+      finishedFile.delete();
+    }
+    currentAudioFileRef.current = null;
+    isAssistantPlaybackActiveRef.current = false;
+    tryPlayNextAssistantSegment();
+  }, [playerStatus?.didJustFinish, tryPlayNextAssistantSegment]);
 
   useEffect(() => {
     audioRecorder.onAudioReady(
@@ -482,28 +423,6 @@ const ChatScreen = () => {
       audioRecorder.clearOnAudioReady();
     };
   }, []);
-
-  const keyExtractor = useCallback((item: MessageChat) => item.id, []);
-
-  const renderMessage = useCallback(
-    ({ item }: { item: MessageChat }) => <CardMessage item={item} />,
-    [],
-  );
-
-  const handleSubmitText = useCallback(() => {
-    sendMessageWithStreaming(text);
-  }, [sendMessageWithStreaming, text]);
-
-  const handleLoadMoreMessages = useCallback(() => {
-    if (!messagesQuery.hasNextPage || messagesQuery.isFetchingNextPage) {
-      return;
-    }
-    messagesQuery.fetchNextPage();
-  }, [
-    messagesQuery.fetchNextPage,
-    messagesQuery.hasNextPage,
-    messagesQuery.isFetchingNextPage,
-  ]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
