@@ -72,9 +72,7 @@ const ChatScreen = () => {
         limit: DEFAULT_MESSAGES_LIMIT,
         order: "asc",
       }),
-    // ✅ CAMBIO: Empezar desde la página 1 (mensajes más recientes)
     initialPageParam: 1,
-    // ✅ CAMBIO: Ir hacia adelante para cargar mensajes más antiguos
     getNextPageParam: (lastPage) =>
       lastPage.page < totalPages ? lastPage.page + 1 : undefined,
     enabled: chatId.length > 0,
@@ -529,12 +527,10 @@ const ChatScreen = () => {
             renderItem={renderMessage}
             keyExtractor={keyExtractor}
             recycleItems
-            alignItemsAtEnd
-            maintainScrollAtEnd
-            maintainScrollAtEndThreshold={0.1}
-            initialScrollIndex={Math.max(0, messages.length - 1)}
             onStartReached={handleLoadMoreMessages}
-            onStartReachedThreshold={0.3}
+            onStartReachedThreshold={0.5}
+            onEndReached={handleLoadMoreMessages}
+            onEndReachedThreshold={0.5}
             ListHeaderComponent={
               messagesQuery.isFetchingNextPage ? (
                 <View style={styles.paginationLoader}>
