@@ -39,6 +39,7 @@ export const fetchListMessagesFromChat = async (
     limit: params?.limit ?? 20,
     order: params?.order ?? "desc",
   };
+  console.log(queryParams?.page);
 
   const response = await api.get<ListMessagesPagination>(
     `/chats/${chatId}/messages`,

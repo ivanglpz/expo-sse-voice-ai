@@ -70,7 +70,7 @@ const ChatScreen = () => {
       await fetchListMessagesFromChat(chatId, {
         page: pageParam,
         limit: DEFAULT_MESSAGES_LIMIT,
-        order: "desc",
+        order: "asc",
       }),
     // ✅ CAMBIO: Empezar desde la página 1 (mensajes más recientes)
     initialPageParam: 1,
@@ -524,16 +524,17 @@ const ChatScreen = () => {
             <View style={styles.headerAction} />
           </View>
           <LegendList
+            ref={flatListRef}
             data={messages}
             renderItem={renderMessage}
             keyExtractor={keyExtractor}
-            recycleItems={true}
-            maintainScrollAtEnd={true}
-            // ✅ CAMBIO: inverted para que scroll empiece abajo
-            ref={flatListRef}
-            // ✅ CAMBIO: onEndReached en vez de onStartReached
-            onEndReached={handleLoadMoreMessages}
-            onEndReachedThreshold={0.3}
+            recycleItems
+            alignItemsAtEnd
+            maintainScrollAtEnd
+            maintainScrollAtEndThreshold={0.1}
+            initialScrollIndex={Math.max(0, messages.length - 1)}
+            onStartReached={handleLoadMoreMessages}
+            onStartReachedThreshold={0.3}
             ListHeaderComponent={
               messagesQuery.isFetchingNextPage ? (
                 <View style={styles.paginationLoader}>
