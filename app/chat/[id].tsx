@@ -1,6 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { LegendList, LegendListRef } from "@legendapp/list";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import {
   setAudioModeAsync,
   useAudioPlayer,
@@ -12,6 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
   KeyboardAvoidingView,
   Pressable,
   StyleSheet,
@@ -26,11 +26,7 @@ import { CardUserMessage } from "../../components/CardUserMessage";
 import { ChatInput } from "../../components/ChatInput";
 import { CONFIG } from "../../config/config";
 import { useSSEStream } from "../../hooks/useSSE";
-import {
-  MessageChat,
-  fetchChatMetadata,
-  fetchListMessagesFromChat,
-} from "../../service/chats";
+import { MessageChat, fetchListMessagesFromChat } from "../../service/chats";
 import { UUID } from "../../utils/uuid";
 import { concatChunks, float32ToInt16, toUint8Array } from "./utils/audio";
 import { readStringField } from "./utils/payload";
@@ -50,7 +46,7 @@ const MIC_RESUME_COOLDOWN_MS = 350;
 const ASSISTANT_AUDIO_MIN_SEGMENT_BYTES = 24 * 1024;
 
 const ASSISTANT_VOICE_ERROR = "Error de voz";
-const DEFAULT_MESSAGES_LIMIT = 20;
+const DEFAULT_MESSAGES_LIMIT = 5;
 
 const ChatScreen = () => {
   const router = useRouter();
@@ -61,24 +57,19 @@ const ChatScreen = () => {
 
   const chatId = typeof params.id === "string" ? params.id : "";
 
-  const queryMeta = useQuery({
-    queryKey: ["chat-messages-meta", chatId],
-    queryFn: async () => await fetchChatMetadata(chatId),
-  });
-
-  const totalPages = queryMeta.data?.totalPages ?? 0;
-
   const messagesQuery = useInfiniteQuery({
     queryKey: ["chat-messages", chatId],
     queryFn: async ({ pageParam }) =>
       await fetchListMessagesFromChat(chatId, {
         page: pageParam,
         limit: DEFAULT_MESSAGES_LIMIT,
-        order: "asc",
+        order: "desc",
       }),
     initialPageParam: 1,
-    getNextPageParam: (lastPage) =>
-      lastPage.page < totalPages ? lastPage.page + 1 : undefined,
+    getNextPageParam: (lastPage) => {
+      const newPage = lastPage.page + 1;
+      return newPage > lastPage.totalPages ? undefined : newPage;
+    },
     enabled: chatId.length > 0,
   });
 
@@ -93,7 +84,7 @@ const ChatScreen = () => {
   const player = useAudioPlayer();
   const playerStatus = useAudioPlayerStatus(player);
 
-  const flatListRef = useRef<LegendListRef>(null);
+  const flatListRef = useRef<FlatList<MessageChat>>(null);
   const currentAIMessageId = useRef<string | null>(null);
   const currentAudioFileRef = useRef<File | null>(null);
 
@@ -367,6 +358,8 @@ const ChatScreen = () => {
   }, [sendMessageWithStreaming, text]);
 
   const handleLoadMoreMessages = useCallback(() => {
+    console.log("loadmoremessages");
+
     if (!messagesQuery.hasNextPage || messagesQuery.isFetchingNextPage) {
       return;
     }
@@ -441,10 +434,11 @@ const ChatScreen = () => {
             </View>
             <View style={styles.headerAction} />
           </View>
-          <LegendList
+          <FlatList
+            inverted
             ref={flatListRef}
             data={messages}
-            renderItem={({ item }: { item: MessageChat }) => {
+            renderItem={({ item }) => {
               if (item.type === "user") {
                 return <CardUserMessage item={item} />;
               }
@@ -454,11 +448,11 @@ const ChatScreen = () => {
               if (item.type === "ai_thinking") {
                 return <CardAIThinking />;
               }
+              return null;
             }}
             keyExtractor={keyExtractor}
-            recycleItems
-            onStartReached={handleLoadMoreMessages}
-            onStartReachedThreshold={0.5}
+            // onStartReached={handleLoadMoreMessages}
+            // onStartReachedThreshold={0.5}
             onEndReached={handleLoadMoreMessages}
             onEndReachedThreshold={0.5}
             ListHeaderComponent={
