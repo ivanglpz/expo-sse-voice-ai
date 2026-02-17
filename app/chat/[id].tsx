@@ -21,6 +21,7 @@ import {
 import { AudioManager, AudioRecorder } from "react-native-audio-api";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { CardAIMessage } from "../../components/CardAIMessage";
+import { CardAIThinking } from "../../components/CardAIThinking";
 import { CardUserMessage } from "../../components/CardUserMessage";
 import { ChatInput } from "../../components/ChatInput";
 import { CONFIG } from "../../config/config";
@@ -449,6 +450,9 @@ const ChatScreen = () => {
               }
               if (item.type === "ai_response") {
                 return <CardAIMessage item={item} />;
+              }
+              if (item.type === "ai_thinking") {
+                return <CardAIThinking />;
               }
             }}
             keyExtractor={keyExtractor}

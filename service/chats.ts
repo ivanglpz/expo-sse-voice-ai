@@ -14,7 +14,14 @@ export const fetchListChats = async (): Promise<Chat[]> => {
 export type MessageChat = {
   id: string;
   chatId: string;
-  type: "user" | "ai" | "assistant" | "transcription" | "ai_response" | "error";
+  type:
+    | "user"
+    | "ai"
+    | "assistant"
+    | "transcription"
+    | "ai_response"
+    | "error"
+    | "ai_thinking";
   content: string;
   createdAt: string;
 };
