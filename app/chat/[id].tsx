@@ -55,7 +55,7 @@ const MIC_RESUME_COOLDOWN_MS = 350;
 const ASSISTANT_AUDIO_MIN_SEGMENT_BYTES = 24 * 1024;
 
 const ASSISTANT_VOICE_ERROR = "Error de voz";
-const DEFAULT_MESSAGES_LIMIT = 5;
+const DEFAULT_MESSAGES_LIMIT = 25;
 const STREAM_TIMEOUT_MS = 3000;
 const MAINTAIN_VISIBLE_CONTENT_POSITION = { minIndexForVisible: 1 };
 
@@ -86,9 +86,10 @@ const ChatScreen = () => {
   const [text, setText] = useState("");
 
   const chatId = typeof params.id === "string" ? params.id : "";
-  const chatMessagesQueryKey = useMemo(() => getChatMessagesQueryKey(chatId), [
-    chatId,
-  ]);
+  const chatMessagesQueryKey = useMemo(
+    () => getChatMessagesQueryKey(chatId),
+    [chatId],
+  );
 
   const messagesQuery = useInfiniteQuery({
     queryKey: chatMessagesQueryKey,
@@ -140,7 +141,13 @@ const ChatScreen = () => {
   const sendRef = useRef<(event: string, data?: unknown) => void>(() => {});
 
   const scrollToBottom = useCallback(() => {
-    flatListRef.current?.scrollToOffset?.({ offset: 0, animated: false });
+    const scroll = () => {
+      flatListRef.current?.scrollToOffset?.({ offset: 0, animated: false });
+    };
+
+    scroll();
+    requestAnimationFrame(scroll);
+    setTimeout(scroll, 60);
   }, []);
 
   const appendMessage = useCallback(
@@ -519,6 +526,7 @@ const ChatScreen = () => {
 
       setText("");
       appendMessage("user", trimmedText);
+      scrollToBottom();
 
       const aiMessageId = UUID();
       currentAIMessageId.current = aiMessageId;
@@ -529,7 +537,7 @@ const ChatScreen = () => {
         body: { message: trimmedText, history: [] },
       });
     },
-    [appendMessage, startStream],
+    [appendMessage, startStream, scrollToBottom],
   );
 
   const handleStartCall = useCallback(async () => {
@@ -587,6 +595,11 @@ const ChatScreen = () => {
   const handleBack = useCallback(() => {
     router.back();
   }, [router]);
+
+  const handleListContentSizeChange = useCallback(() => {
+    if (!currentAIMessageId.current) return;
+    scrollToBottom();
+  }, [scrollToBottom]);
 
   useEffect(() => {
     setAudioModeAsync({
@@ -664,15 +677,11 @@ const ChatScreen = () => {
             maintainVisibleContentPosition={MAINTAIN_VISIBLE_CONTENT_POSITION}
             renderItem={renderMessageItem}
             keyExtractor={keyExtractor}
+            onContentSizeChange={handleListContentSizeChange}
             onEndReached={handleLoadMoreMessages}
-            onEndReachedThreshold={0.2}
+            onEndReachedThreshold={0.6}
             ListHeaderComponent={paginationLoader}
           />
-          {isStreaming ? (
-            <View style={styles.streamingBanner}>
-              <Text style={styles.streamingText}>AI is thinking...</Text>
-            </View>
-          ) : null}
 
           <ChatInput
             value={text}

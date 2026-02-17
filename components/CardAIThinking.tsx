@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { Text, View } from "react-native";
+import { View } from "react-native";
 
 export const CardAIThinking = memo(() => {
   return (
@@ -18,7 +18,14 @@ export const CardAIThinking = memo(() => {
           borderRadius: 12,
         }}
       >
-        <Text style={{ color: "#333" }}>AI is thinking...</Text>
+        <View
+          style={{
+            backgroundColor: "black",
+            borderRadius: 100,
+            width: 20,
+            height: 20,
+          }}
+        />
       </View>
     </View>
   );
