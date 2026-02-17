@@ -8,7 +8,7 @@ import {
 } from "expo-audio";
 import { File, Paths } from "expo-file-system";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -20,7 +20,8 @@ import {
 } from "react-native";
 import { AudioManager, AudioRecorder } from "react-native-audio-api";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { CardMessage } from "../../components/CardMessage";
+import { CardAIMessage } from "../../components/CardAIMessage";
+import { CardUserMessage } from "../../components/CardUserMessage";
 import { ChatInput } from "../../components/ChatInput";
 import { CONFIG } from "../../config/config";
 import { useSSEStream } from "../../hooks/useSSE";
@@ -80,9 +81,13 @@ const ChatScreen = () => {
     enabled: chatId.length > 0,
   });
 
-  const messages = Array.isArray(messagesQuery.data?.pages)
-    ? messagesQuery.data?.pages?.flatMap((e) => e?.messages)
-    : [];
+  const messages = useMemo(() => {
+    const pages = messagesQuery.data?.pages;
+    if (!Array.isArray(pages)) {
+      return [];
+    }
+    return pages?.flatMap((e) => e.messages);
+  }, [messagesQuery.data?.pages]);
 
   const player = useAudioPlayer();
   const playerStatus = useAudioPlayerStatus(player);
@@ -356,11 +361,6 @@ const ChatScreen = () => {
 
   const keyExtractor = useCallback((item: MessageChat) => item.id, []);
 
-  const renderMessage = useCallback(
-    ({ item }: { item: MessageChat }) => <CardMessage item={item} />,
-    [],
-  );
-
   const handleSubmitText = useCallback(() => {
     sendMessageWithStreaming(text);
   }, [sendMessageWithStreaming, text]);
@@ -443,7 +443,14 @@ const ChatScreen = () => {
           <LegendList
             ref={flatListRef}
             data={messages}
-            renderItem={renderMessage}
+            renderItem={({ item }: { item: MessageChat }) => {
+              if (item.type === "user") {
+                return <CardUserMessage item={item} />;
+              }
+              if (item.type === "ai_response") {
+                return <CardAIMessage item={item} />;
+              }
+            }}
             keyExtractor={keyExtractor}
             recycleItems
             onStartReached={handleLoadMoreMessages}

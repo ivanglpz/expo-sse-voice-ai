@@ -29,7 +29,11 @@ const Index = () => {
     onSuccess: () => {
       query.refetch();
     },
+    onError: (error) => {
+      console.log(error);
+    },
   });
+  console.log(query?.data);
 
   if (query?.data?.length === 0) {
     return (
