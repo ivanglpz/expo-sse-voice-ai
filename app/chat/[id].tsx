@@ -1,5 +1,9 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { useInfiniteQuery } from "@tanstack/react-query";
+import {
+  InfiniteData,
+  useInfiniteQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import {
   setAudioModeAsync,
   useAudioPlayer,
@@ -26,7 +30,11 @@ import { CardUserMessage } from "../../components/CardUserMessage";
 import { ChatInput } from "../../components/ChatInput";
 import { CONFIG } from "../../config/config";
 import { useSSEStream } from "../../hooks/useSSE";
-import { MessageChat, fetchListMessagesFromChat } from "../../service/chats";
+import {
+  ListMessagesPagination,
+  MessageChat,
+  fetchListMessagesFromChat,
+} from "../../service/chats";
 import { UUID } from "../../utils/uuid";
 import { concatChunks, float32ToInt16, toUint8Array } from "./utils/audio";
 import { readStringField } from "./utils/payload";
@@ -51,6 +59,7 @@ const DEFAULT_MESSAGES_LIMIT = 5;
 const ChatScreen = () => {
   const router = useRouter();
   const params = useLocalSearchParams<{ id: string }>();
+  const queryClient = useQueryClient();
 
   const [isRecording, setIsRecording] = useState(false);
   const [text, setText] = useState("");
@@ -104,13 +113,165 @@ const ChatScreen = () => {
   }, []);
 
   const appendMessage = useCallback(
-    (type: MessageChat["type"], rawText: string) => {
+    (type: MessageChat["type"], rawText: string, id = UUID()) => {
       const messageText = rawText.trim();
       if (!messageText) return;
+
+      queryClient.setQueryData<InfiniteData<ListMessagesPagination>>(
+        ["chat-messages", chatId],
+        (current) => {
+          const newMessage: MessageChat = {
+            id,
+            chatId,
+            type,
+            content: messageText,
+            createdAt: new Date().toISOString(),
+          };
+
+          if (!current?.pages?.length) {
+            return {
+              pages: [
+                {
+                  messages: [newMessage],
+                  page: 1,
+                  limit: DEFAULT_MESSAGES_LIMIT,
+                  total: 1,
+                  totalPages: 1,
+                },
+              ],
+              pageParams: [1],
+            };
+          }
+
+          const nextPages = [...current.pages];
+          const firstPage = nextPages[0];
+          nextPages[0] = {
+            ...firstPage,
+            messages: [newMessage, ...firstPage.messages],
+          };
+
+          return {
+            ...current,
+            pages: nextPages,
+          };
+        },
+      );
       scrollToBottom();
     },
-    [],
+    [chatId, queryClient, scrollToBottom],
   );
+
+  const upsertFirstPageAssistantMessage = useCallback(
+    (rawText: string) => {
+      const assistantId = currentAIMessageId.current;
+      const nextText = rawText;
+      if (!assistantId || !nextText) return;
+
+      queryClient.setQueryData<InfiniteData<ListMessagesPagination>>(
+        ["chat-messages", chatId],
+        (current) => {
+          if (!current?.pages?.length) {
+            const message: MessageChat = {
+              id: assistantId,
+              chatId,
+              type: "ai_response",
+              content: nextText,
+              createdAt: new Date().toISOString(),
+            };
+
+            return {
+              pages: [
+                {
+                  messages: [message],
+                  page: 1,
+                  limit: DEFAULT_MESSAGES_LIMIT,
+                  total: 1,
+                  totalPages: 1,
+                },
+              ],
+              pageParams: [1],
+            };
+          }
+
+          const nextPages = [...current.pages];
+          const firstPage = nextPages[0];
+          const firstPageMessages = [...firstPage.messages];
+          const currentMessage = firstPageMessages.find(
+            (m) => m.id === assistantId,
+          );
+
+          if (!currentMessage) {
+            const message: MessageChat = {
+              id: assistantId,
+              chatId,
+              type: "ai_response",
+              content: nextText,
+              createdAt: new Date().toISOString(),
+            };
+
+            nextPages[0] = {
+              ...firstPage,
+              messages: [message, ...firstPageMessages],
+            };
+
+            return {
+              ...current,
+              pages: nextPages,
+            };
+          }
+
+          const previous = currentMessage.content ?? "";
+          const merged = nextText.startsWith(previous)
+            ? nextText
+            : `${previous}${nextText}`;
+
+          nextPages[0] = {
+            ...firstPage,
+            messages: firstPageMessages.map((message) =>
+              message.id === assistantId
+                ? { ...message, type: "ai_response", content: merged }
+                : message,
+            ),
+          };
+
+          return {
+            ...current,
+            pages: nextPages,
+          };
+        },
+      );
+      scrollToBottom();
+    },
+    [chatId, queryClient, scrollToBottom],
+  );
+
+  const ensureAssistantResponseType = useCallback(() => {
+    const assistantId = currentAIMessageId.current;
+    if (!assistantId) return;
+
+    queryClient.setQueryData<InfiniteData<ListMessagesPagination>>(
+      ["chat-messages", chatId],
+      (current) => {
+        if (!current?.pages?.length) return current;
+
+        const nextPages = [...current.pages];
+        const firstPage = nextPages[0];
+        nextPages[0] = {
+          ...firstPage,
+          messages: firstPage.messages.map((message) =>
+            message.id === assistantId && message.type === "ai_thinking"
+              ? { ...message, type: "ai_response" }
+              : message,
+          ),
+        };
+
+        return {
+          ...current,
+          pages: nextPages,
+        };
+      },
+    );
+  }, [chatId, queryClient]);
 
   const finishAssistantTurn = useCallback(() => {
     isAssistantPlaybackActiveRef.current = false;
@@ -214,25 +375,42 @@ const ChatScreen = () => {
     [tryPlayNextAssistantSegment],
   );
 
-  const onStreamMessage = useCallback((data: { content?: string }) => {
-    if (!data.content || !currentAIMessageId.current) {
-      return;
-    }
-  }, []);
+  const onStreamMessage = useCallback(
+    (data: { content?: string; message?: string; text?: string }) => {
+      if (!currentAIMessageId.current) {
+        return;
+      }
+
+      const chunk =
+        readStringField(data, "content") ||
+        readStringField(data, "message") ||
+        readStringField(data, "text");
+
+      if (!chunk) {
+        ensureAssistantResponseType();
+        return;
+      }
+
+      upsertFirstPageAssistantMessage(chunk);
+    },
+    [ensureAssistantResponseType, upsertFirstPageAssistantMessage],
+  );
 
   const onStreamError = useCallback(() => {
     console.log("error en el chat sse");
 
     if (currentAIMessageId.current) {
+      ensureAssistantResponseType();
       Alert.alert("Error", "Failed to get AI response");
     }
     currentAIMessageId.current = null;
-  }, []);
+  }, [ensureAssistantResponseType]);
 
   const onStreamClose = useCallback(() => {
     console.log("SSE Connection closed");
+    ensureAssistantResponseType();
     currentAIMessageId.current = null;
-  }, []);
+  }, [ensureAssistantResponseType]);
 
   const { isStreaming, startStream } = useSSEStream({
     url: `${CONFIG.API_URL}/chats/${chatId}/stream`,
@@ -309,6 +487,7 @@ const ChatScreen = () => {
 
       const aiMessageId = UUID();
       currentAIMessageId.current = aiMessageId;
+      appendMessage("ai_thinking", "", aiMessageId);
 
       scrollToBottom();
 
