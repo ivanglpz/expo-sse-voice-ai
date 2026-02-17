@@ -17,6 +17,7 @@ import {
   Alert,
   FlatList,
   KeyboardAvoidingView,
+  ListRenderItem,
   Pressable,
   StyleSheet,
   Text,
@@ -55,6 +56,26 @@ const ASSISTANT_AUDIO_MIN_SEGMENT_BYTES = 24 * 1024;
 
 const ASSISTANT_VOICE_ERROR = "Error de voz";
 const DEFAULT_MESSAGES_LIMIT = 5;
+const STREAM_TIMEOUT_MS = 3000;
+const MAINTAIN_VISIBLE_CONTENT_POSITION = { minIndexForVisible: 1 };
+
+const getChatMessagesQueryKey = (chatId: string) =>
+  ["chat-messages", chatId] as const;
+
+const keyExtractor = (item: MessageChat) => item.id;
+
+const renderMessageItem: ListRenderItem<MessageChat> = ({ item }) => {
+  if (item.type === "user") {
+    return <CardUserMessage item={item} />;
+  }
+  if (item.type === "ai_response") {
+    return <CardAIMessage item={item} />;
+  }
+  if (item.type === "ai_thinking") {
+    return <CardAIThinking />;
+  }
+  return null;
+};
 
 const ChatScreen = () => {
   const router = useRouter();
@@ -65,11 +86,14 @@ const ChatScreen = () => {
   const [text, setText] = useState("");
 
   const chatId = typeof params.id === "string" ? params.id : "";
+  const chatMessagesQueryKey = useMemo(() => getChatMessagesQueryKey(chatId), [
+    chatId,
+  ]);
 
   const messagesQuery = useInfiniteQuery({
-    queryKey: ["chat-messages", chatId],
-    queryFn: async ({ pageParam }) =>
-      await fetchListMessagesFromChat(chatId, {
+    queryKey: chatMessagesQueryKey,
+    queryFn: ({ pageParam }) =>
+      fetchListMessagesFromChat(chatId, {
         page: pageParam,
         limit: DEFAULT_MESSAGES_LIMIT,
         order: "desc",
@@ -82,13 +106,20 @@ const ChatScreen = () => {
     enabled: chatId.length > 0,
   });
 
+  const {
+    data: messagesData,
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
+  } = messagesQuery;
+
   const messages = useMemo(() => {
-    const pages = messagesQuery.data?.pages;
+    const pages = messagesData?.pages;
     if (!Array.isArray(pages)) {
       return [];
     }
     return pages?.flatMap((e) => e.messages);
-  }, [messagesQuery.data?.pages]);
+  }, [messagesData?.pages]);
 
   const player = useAudioPlayer();
   const playerStatus = useAudioPlayerStatus(player);
@@ -115,10 +146,10 @@ const ChatScreen = () => {
   const appendMessage = useCallback(
     (type: MessageChat["type"], rawText: string, id = UUID()) => {
       const messageText = rawText.trim();
-      if (!messageText) return;
+      if (!messageText && type !== "ai_thinking") return;
 
       queryClient.setQueryData<InfiniteData<ListMessagesPagination>>(
-        ["chat-messages", chatId],
+        chatMessagesQueryKey,
         (current) => {
           const newMessage: MessageChat = {
             id,
@@ -158,7 +189,7 @@ const ChatScreen = () => {
       );
       scrollToBottom();
     },
-    [chatId, queryClient, scrollToBottom],
+    [chatId, chatMessagesQueryKey, queryClient, scrollToBottom],
   );
 
   const upsertFirstPageAssistantMessage = useCallback(
@@ -168,7 +199,7 @@ const ChatScreen = () => {
       if (!assistantId || !nextText) return;
 
       queryClient.setQueryData<InfiniteData<ListMessagesPagination>>(
-        ["chat-messages", chatId],
+        chatMessagesQueryKey,
         (current) => {
           if (!current?.pages?.length) {
             const message: MessageChat = {
@@ -242,7 +273,7 @@ const ChatScreen = () => {
       );
       scrollToBottom();
     },
-    [chatId, queryClient, scrollToBottom],
+    [chatId, chatMessagesQueryKey, queryClient, scrollToBottom],
   );
 
   const ensureAssistantResponseType = useCallback(() => {
@@ -250,7 +281,7 @@ const ChatScreen = () => {
     if (!assistantId) return;
 
     queryClient.setQueryData<InfiniteData<ListMessagesPagination>>(
-      ["chat-messages", chatId],
+      chatMessagesQueryKey,
       (current) => {
         if (!current?.pages?.length) return current;
 
@@ -271,7 +302,7 @@ const ChatScreen = () => {
         };
       },
     );
-  }, [chatId, queryClient]);
+  }, [chatMessagesQueryKey, queryClient]);
 
   const finishAssistantTurn = useCallback(() => {
     isAssistantPlaybackActiveRef.current = false;
@@ -412,13 +443,17 @@ const ChatScreen = () => {
     currentAIMessageId.current = null;
   }, [ensureAssistantResponseType]);
 
+  const onStreamOpen = useCallback(() => {
+    console.log("SSE Connection opened");
+  }, []);
+
   const { isStreaming, startStream } = useSSEStream({
     url: `${CONFIG.API_URL}/chats/${chatId}/stream`,
     onMessage: onStreamMessage,
     onError: onStreamError,
-    onOpen: () => console.log("SSE Connection opened"),
+    onOpen: onStreamOpen,
     onClose: onStreamClose,
-    timeout: 3000,
+    timeout: STREAM_TIMEOUT_MS,
   });
 
   const onSocketMessage = useCallback(
@@ -489,14 +524,12 @@ const ChatScreen = () => {
       currentAIMessageId.current = aiMessageId;
       appendMessage("ai_thinking", "", aiMessageId);
 
-      scrollToBottom();
-
       startStream({
         method: "POST",
         body: { message: trimmedText, history: [] },
       });
     },
-    [appendMessage, scrollToBottom, startStream],
+    [appendMessage, startStream],
   );
 
   const handleStartCall = useCallback(async () => {
@@ -530,24 +563,30 @@ const ChatScreen = () => {
     stopAssistantPlayback(true);
   }, [stopAssistantPlayback]);
 
-  const keyExtractor = useCallback((item: MessageChat) => item.id, []);
-
   const handleSubmitText = useCallback(() => {
     sendMessageWithStreaming(text);
   }, [sendMessageWithStreaming, text]);
 
   const handleLoadMoreMessages = useCallback(() => {
-    console.log("loadmoremessages");
-
-    if (!messagesQuery.hasNextPage || messagesQuery.isFetchingNextPage) {
+    if (!hasNextPage || isFetchingNextPage) {
       return;
     }
-    messagesQuery.fetchNextPage();
-  }, [
-    messagesQuery.fetchNextPage,
-    messagesQuery.hasNextPage,
-    messagesQuery.isFetchingNextPage,
-  ]);
+    fetchNextPage();
+  }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
+
+  const paginationLoader = useMemo(() => {
+    if (!isFetchingNextPage) return null;
+
+    return (
+      <View style={styles.paginationLoader}>
+        <ActivityIndicator size="small" />
+      </View>
+    );
+  }, [isFetchingNextPage]);
+
+  const handleBack = useCallback(() => {
+    router.back();
+  }, [router]);
 
   useEffect(() => {
     setAudioModeAsync({
@@ -603,7 +642,7 @@ const ChatScreen = () => {
         <View style={styles.container}>
           <View style={styles.header}>
             <View style={styles.headerAction}>
-              <Pressable onPress={() => router.back()}>
+              <Pressable onPress={handleBack}>
                 <Ionicons name="arrow-back" size={24} color="black" />
               </Pressable>
             </View>
@@ -622,29 +661,12 @@ const ChatScreen = () => {
             updateCellsBatchingPeriod={50}
             windowSize={9}
             removeClippedSubviews
-            maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
-            renderItem={({ item }) => {
-              if (item.type === "user") {
-                return <CardUserMessage item={item} />;
-              }
-              if (item.type === "ai_response") {
-                return <CardAIMessage item={item} />;
-              }
-              if (item.type === "ai_thinking") {
-                return <CardAIThinking />;
-              }
-              return null;
-            }}
+            maintainVisibleContentPosition={MAINTAIN_VISIBLE_CONTENT_POSITION}
+            renderItem={renderMessageItem}
             keyExtractor={keyExtractor}
             onEndReached={handleLoadMoreMessages}
             onEndReachedThreshold={0.2}
-            ListHeaderComponent={
-              messagesQuery.isFetchingNextPage ? (
-                <View style={styles.paginationLoader}>
-                  <ActivityIndicator size="small" />
-                </View>
-              ) : null
-            }
+            ListHeaderComponent={paginationLoader}
           />
           {isStreaming ? (
             <View style={styles.streamingBanner}>
@@ -700,9 +722,6 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 12,
     opacity: 0.5,
-  },
-  listContent: {
-    paddingVertical: 12,
   },
   paginationLoader: {
     paddingVertical: 12,
