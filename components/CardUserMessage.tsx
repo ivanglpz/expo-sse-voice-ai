@@ -1,7 +1,8 @@
+import { memo } from "react";
 import { Text, View } from "react-native";
 import { MessageChat } from "../service/chats";
 
-export const CardUserMessage = ({ item }: { item: MessageChat }) => {
+export const CardUserMessage = memo(({ item }: { item: MessageChat }) => {
   return (
     <View
       style={{
@@ -23,4 +24,4 @@ export const CardUserMessage = ({ item }: { item: MessageChat }) => {
       </View>
     </View>
   );
-};
+});

@@ -617,6 +617,12 @@ const ChatScreen = () => {
             inverted
             ref={flatListRef}
             data={messages}
+            initialNumToRender={14}
+            maxToRenderPerBatch={10}
+            updateCellsBatchingPeriod={50}
+            windowSize={9}
+            removeClippedSubviews
+            maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
             renderItem={({ item }) => {
               if (item.type === "user") {
                 return <CardUserMessage item={item} />;
@@ -630,10 +636,8 @@ const ChatScreen = () => {
               return null;
             }}
             keyExtractor={keyExtractor}
-            // onStartReached={handleLoadMoreMessages}
-            // onStartReachedThreshold={0.5}
             onEndReached={handleLoadMoreMessages}
-            onEndReachedThreshold={0.5}
+            onEndReachedThreshold={0.2}
             ListHeaderComponent={
               messagesQuery.isFetchingNextPage ? (
                 <View style={styles.paginationLoader}>

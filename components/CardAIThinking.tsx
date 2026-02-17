@@ -1,6 +1,7 @@
+import { memo } from "react";
 import { Text, View } from "react-native";
 
-export const CardAIThinking = () => {
+export const CardAIThinking = memo(() => {
   return (
     <View
       style={{
@@ -21,4 +22,4 @@ export const CardAIThinking = () => {
       </View>
     </View>
   );
-};
+});
