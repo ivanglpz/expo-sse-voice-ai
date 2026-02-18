@@ -22,7 +22,6 @@ import {
   Alert,
   KeyboardAvoidingView,
   Pressable,
-  RefreshControl,
   StyleSheet,
   Text,
   View,
@@ -683,14 +682,6 @@ const ChatScreen = () => {
             maintainScrollAtEnd
             maintainVisibleContentPosition
             recycleItems={true}
-            refreshControl={
-              <RefreshControl
-                onRefresh={() => {}}
-                progressViewOffset={40}
-                refreshing={false}
-                tintColor={"#000000"}
-              />
-            }
             ref={listRef}
             renderItem={renderMessageItem}
             alignItemsAtEnd
