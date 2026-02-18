@@ -148,7 +148,7 @@ const ChatScreen = () => {
   const sendRef = useRef<(event: string, data?: unknown) => void>(() => {});
   const scrollToBottom = useCallback(() => {
     listRef.current?.scrollToEnd({ animated: false });
-  }, []);
+  }, [messages.length]);
 
   const appendMessage = useCallback(
     (type: MessageChat["type"], rawText: string, id = UUID()) => {
@@ -679,6 +679,7 @@ const ChatScreen = () => {
               messages.length > 0 ? messages.length - 1 : undefined
             }
             keyExtractor={(item) => item.id}
+            ListFooterComponent={<View style={styles.listFooterSpacer} />}
             maintainScrollAtEnd
             maintainVisibleContentPosition
             recycleItems={true}
@@ -752,6 +753,9 @@ const styles = StyleSheet.create({
   streamingText: {
     fontSize: 12,
     opacity: 0.6,
+  },
+  listFooterSpacer: {
+    height: 70,
   },
 });
 
