@@ -141,13 +141,7 @@ const ChatScreen = () => {
   const sendRef = useRef<(event: string, data?: unknown) => void>(() => {});
 
   const scrollToBottom = useCallback(() => {
-    const scroll = () => {
-      flatListRef.current?.scrollToOffset?.({ offset: 0, animated: false });
-    };
-
-    scroll();
-    requestAnimationFrame(scroll);
-    setTimeout(scroll, 60);
+    flatListRef.current?.scrollToOffset?.({ offset: 0, animated: false });
   }, []);
 
   const appendMessage = useCallback(
