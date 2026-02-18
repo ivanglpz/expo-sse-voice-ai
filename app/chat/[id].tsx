@@ -1,5 +1,10 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import {
+  LegendList,
+  LegendListRef,
+  LegendListRenderItemProps,
+} from "@legendapp/list";
+import {
   InfiniteData,
   useInfiniteQuery,
   useQueryClient,
@@ -16,11 +21,9 @@ import {
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
-  ListRenderItem,
   Pressable,
   StyleSheet,
   Text,
-  VirtualizedList,
   View,
 } from "react-native";
 import { AudioManager, AudioRecorder } from "react-native-audio-api";
@@ -57,14 +60,15 @@ const ASSISTANT_AUDIO_MIN_SEGMENT_BYTES = 24 * 1024;
 const ASSISTANT_VOICE_ERROR = "Error de voz";
 const DEFAULT_MESSAGES_LIMIT = 25;
 const STREAM_TIMEOUT_MS = 3000;
-const MAINTAIN_VISIBLE_CONTENT_POSITION = { minIndexForVisible: 1 };
 
 const getChatMessagesQueryKey = (chatId: string) =>
   ["chat-messages", chatId] as const;
 
 const keyExtractor = (item: MessageChat) => item.id;
 
-const renderMessageItem: ListRenderItem<MessageChat> = ({ item }) => {
+const renderMessageItem = ({
+  item,
+}: LegendListRenderItemProps<MessageChat>) => {
   if (item.type === "user") {
     return <CardUserMessage item={item} />;
   }
@@ -119,13 +123,16 @@ const ChatScreen = () => {
     if (!Array.isArray(pages)) {
       return [];
     }
-    return pages?.flatMap((e) => e.messages);
+    return pages
+      .flatMap((e) => e.messages)
+      .slice()
+      .reverse();
   }, [messagesData?.pages]);
 
   const player = useAudioPlayer();
   const playerStatus = useAudioPlayerStatus(player);
 
-  const flatListRef = useRef<VirtualizedList<MessageChat>>(null);
+  const listRef = useRef<LegendListRef>(null);
   const currentAudioFileRef = useRef<File | null>(null);
 
   const incomingAudioChunksRef = useRef<Uint8Array[]>([]);
@@ -138,9 +145,9 @@ const ChatScreen = () => {
   const isRecordingRef = useRef(isRecording);
   const isConnectedRef = useRef(false);
   const sendRef = useRef<(event: string, data?: unknown) => void>(() => {});
-  const scrollToBottom = useCallback(() => {
-    flatListRef.current?.scrollToOffset?.({ offset: 0, animated: false });
-  }, []);
+  const scrollToBottom = () => {
+    listRef.current?.scrollToEnd({ animated: false });
+  };
 
   const appendMessage = useCallback(
     (type: MessageChat["type"], rawText: string, id = UUID()) => {
@@ -563,6 +570,8 @@ const ChatScreen = () => {
   }, [sendMessageWithStreaming, text]);
 
   const handleLoadMoreMessages = useCallback(() => {
+    console.log("ejecutandose ");
+
     if (!hasNextPage || isFetchingNextPage) {
       return;
     }
@@ -631,6 +640,10 @@ const ChatScreen = () => {
     };
   }, []);
 
+  useEffect(() => {
+    listRef.current?.scrollToEnd({ animated: false });
+  }, [messages.length]);
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <KeyboardAvoidingView behavior="padding" style={styles.keyboardContainer}>
@@ -647,24 +660,37 @@ const ChatScreen = () => {
             </View>
             <View style={styles.headerAction} />
           </View>
-          <VirtualizedList
-            inverted
-            ref={flatListRef}
+          <LegendList
             data={messages}
-            getItem={(data, index) => data[index]}
-            getItemCount={(data) => data.length}
-            initialNumToRender={14}
-            maxToRenderPerBatch={10}
-            updateCellsBatchingPeriod={50}
-            windowSize={9}
-            removeClippedSubviews
-            maintainVisibleContentPosition={MAINTAIN_VISIBLE_CONTENT_POSITION}
+            ref={listRef}
             renderItem={renderMessageItem}
-            keyExtractor={keyExtractor}
-            onEndReached={handleLoadMoreMessages}
-            onEndReachedThreshold={0.6}
+            keyExtractor={(item) => item.id}
+            recycleItems
+            estimatedItemSize={90} // baja esto (no 320)
+            initialContainerPoolRatio={5} // sube pool inicial
+            drawDistance={180} // opcional, reduce presión
+            maintainVisibleContentPosition
+            maintainScrollAtEnd
+            alignItemsAtEnd
+            // style={{ backgroundColor: "red", flex: 1 }}
+            maintainScrollAtEndThreshold={0.2}
+            onStartReached={handleLoadMoreMessages}
+            onStartReachedThreshold={0.6}
             ListHeaderComponent={paginationLoader}
           />
+          {/* <LegendList
+            ref={listRef}
+            data={messages}
+            estimatedItemSize={140}
+            alignItemsAtEnd
+            maintainVisibleContentPosition
+            maintainScrollAtEnd
+            renderItem={renderMessageItem}
+            keyExtractor={keyExtractor}
+            onStartReached={handleLoadMoreMessages}
+            onStartReachedThreshold={0.6}
+            ListHeaderComponent={paginationLoader}
+          /> */}
 
           <ChatInput
             value={text}
