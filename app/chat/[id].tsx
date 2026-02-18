@@ -126,7 +126,6 @@ const ChatScreen = () => {
   const playerStatus = useAudioPlayerStatus(player);
 
   const flatListRef = useRef<FlatList<MessageChat>>(null);
-  const currentAIMessageId = useRef<string | null>(null);
   const currentAudioFileRef = useRef<File | null>(null);
 
   const incomingAudioChunksRef = useRef<Uint8Array[]>([]);
@@ -195,16 +194,15 @@ const ChatScreen = () => {
 
   const upsertFirstPageAssistantMessage = useCallback(
     (rawText: string) => {
-      const assistantId = currentAIMessageId.current;
       const nextText = rawText;
-      if (!assistantId || !nextText) return;
+      if (!nextText) return;
 
       queryClient.setQueryData<InfiniteData<ListMessagesPagination>>(
         chatMessagesQueryKey,
         (current) => {
           if (!current?.pages?.length) {
             const message: MessageChat = {
-              id: assistantId,
+              id: UUID(),
               chatId,
               type: "ai_response",
               content: nextText,
@@ -229,12 +227,12 @@ const ChatScreen = () => {
           const firstPage = nextPages[0];
           const firstPageMessages = [...firstPage.messages];
           const currentMessage = firstPageMessages.find(
-            (m) => m.id === assistantId,
+            (m) => m.type === "ai_thinking" || m.type === "ai_response",
           );
 
           if (!currentMessage) {
             const message: MessageChat = {
-              id: assistantId,
+              id: UUID(),
               chatId,
               type: "ai_response",
               content: nextText,
@@ -260,7 +258,7 @@ const ChatScreen = () => {
           nextPages[0] = {
             ...firstPage,
             messages: firstPageMessages.map((message) =>
-              message.id === assistantId
+              message.id === currentMessage.id
                 ? { ...message, type: "ai_response", content: merged }
                 : message,
             ),
@@ -278,9 +276,6 @@ const ChatScreen = () => {
   );
 
   const ensureAssistantResponseType = useCallback(() => {
-    const assistantId = currentAIMessageId.current;
-    if (!assistantId) return;
-
     queryClient.setQueryData<InfiniteData<ListMessagesPagination>>(
       chatMessagesQueryKey,
       (current) => {
@@ -288,10 +283,19 @@ const ChatScreen = () => {
 
         const nextPages = [...current.pages];
         const firstPage = nextPages[0];
+        const assistantMessage = firstPage.messages.find(
+          (message) =>
+            message.type === "ai_thinking" || message.type === "ai_response",
+        );
+
+        if (!assistantMessage) {
+          return current;
+        }
+
         nextPages[0] = {
           ...firstPage,
           messages: firstPage.messages.map((message) =>
-            message.id === assistantId && message.type === "ai_thinking"
+            message.id === assistantMessage.id && message.type === "ai_thinking"
               ? { ...message, type: "ai_response" }
               : message,
           ),
@@ -409,10 +413,6 @@ const ChatScreen = () => {
 
   const onStreamMessage = useCallback(
     (data: { content?: string; message?: string; text?: string }) => {
-      if (!currentAIMessageId.current) {
-        return;
-      }
-
       const chunk =
         readStringField(data, "content") ||
         readStringField(data, "message") ||
@@ -431,17 +431,13 @@ const ChatScreen = () => {
   const onStreamError = useCallback(() => {
     console.log("error en el chat sse");
 
-    if (currentAIMessageId.current) {
-      ensureAssistantResponseType();
-      Alert.alert("Error", "Failed to get AI response");
-    }
-    currentAIMessageId.current = null;
+    ensureAssistantResponseType();
+    Alert.alert("Error", "Failed to get AI response");
   }, [ensureAssistantResponseType]);
 
   const onStreamClose = useCallback(() => {
     console.log("SSE Connection closed");
     ensureAssistantResponseType();
-    currentAIMessageId.current = null;
   }, [ensureAssistantResponseType]);
 
   const onStreamOpen = useCallback(() => {
@@ -522,9 +518,7 @@ const ChatScreen = () => {
       appendMessage("user", trimmedText);
       scrollToBottom();
 
-      const aiMessageId = UUID();
-      currentAIMessageId.current = aiMessageId;
-      appendMessage("ai_thinking", "", aiMessageId);
+      appendMessage("ai_thinking", "");
 
       startStream({
         method: "POST",
@@ -591,7 +585,6 @@ const ChatScreen = () => {
   }, [router]);
 
   const handleListContentSizeChange = useCallback(() => {
-    if (!currentAIMessageId.current) return;
     scrollToBottom();
   }, [scrollToBottom]);
 
