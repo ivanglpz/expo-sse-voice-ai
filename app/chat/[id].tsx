@@ -584,10 +584,6 @@ const ChatScreen = () => {
     router.back();
   }, [router]);
 
-  const handleListContentSizeChange = useCallback(() => {
-    scrollToBottom();
-  }, [scrollToBottom]);
-
   useEffect(() => {
     setAudioModeAsync({
       allowsRecording: true,
@@ -664,7 +660,6 @@ const ChatScreen = () => {
             maintainVisibleContentPosition={MAINTAIN_VISIBLE_CONTENT_POSITION}
             renderItem={renderMessageItem}
             keyExtractor={keyExtractor}
-            onContentSizeChange={handleListContentSizeChange}
             onEndReached={handleLoadMoreMessages}
             onEndReachedThreshold={0.6}
             ListHeaderComponent={paginationLoader}
