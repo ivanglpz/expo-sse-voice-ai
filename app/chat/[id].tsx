@@ -15,12 +15,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
   KeyboardAvoidingView,
   ListRenderItem,
   Pressable,
   StyleSheet,
   Text,
+  VirtualizedList,
   View,
 } from "react-native";
 import { AudioManager, AudioRecorder } from "react-native-audio-api";
@@ -125,7 +125,7 @@ const ChatScreen = () => {
   const player = useAudioPlayer();
   const playerStatus = useAudioPlayerStatus(player);
 
-  const flatListRef = useRef<FlatList<MessageChat>>(null);
+  const flatListRef = useRef<VirtualizedList<MessageChat>>(null);
   const currentAudioFileRef = useRef<File | null>(null);
 
   const incomingAudioChunksRef = useRef<Uint8Array[]>([]);
@@ -138,7 +138,6 @@ const ChatScreen = () => {
   const isRecordingRef = useRef(isRecording);
   const isConnectedRef = useRef(false);
   const sendRef = useRef<(event: string, data?: unknown) => void>(() => {});
-
   const scrollToBottom = useCallback(() => {
     flatListRef.current?.scrollToOffset?.({ offset: 0, animated: false });
   }, []);
@@ -648,10 +647,12 @@ const ChatScreen = () => {
             </View>
             <View style={styles.headerAction} />
           </View>
-          <FlatList
+          <VirtualizedList
             inverted
             ref={flatListRef}
             data={messages}
+            getItem={(data, index) => data[index]}
+            getItemCount={(data) => data.length}
             initialNumToRender={14}
             maxToRenderPerBatch={10}
             updateCellsBatchingPeriod={50}
