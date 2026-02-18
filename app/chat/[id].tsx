@@ -22,6 +22,7 @@ import {
   Alert,
   KeyboardAvoidingView,
   Pressable,
+  RefreshControl,
   StyleSheet,
   Text,
   View,
@@ -134,6 +135,7 @@ const ChatScreen = () => {
 
   const listRef = useRef<LegendListRef>(null);
   const currentAudioFileRef = useRef<File | null>(null);
+  const hasAutoScrolledOnInitialLoadRef = useRef(false);
 
   const incomingAudioChunksRef = useRef<Uint8Array[]>([]);
   const incomingAudioBytesRef = useRef(0);
@@ -145,9 +147,9 @@ const ChatScreen = () => {
   const isRecordingRef = useRef(isRecording);
   const isConnectedRef = useRef(false);
   const sendRef = useRef<(event: string, data?: unknown) => void>(() => {});
-  const scrollToBottom = () => {
+  const scrollToBottom = useCallback(() => {
     listRef.current?.scrollToEnd({ animated: false });
-  };
+  }, []);
 
   const appendMessage = useCallback(
     (type: MessageChat["type"], rawText: string, id = UUID()) => {
@@ -641,8 +643,19 @@ const ChatScreen = () => {
   }, []);
 
   useEffect(() => {
-    listRef.current?.scrollToEnd({ animated: false });
-  }, [messages.length]);
+    if (messages.length === 0) {
+      hasAutoScrolledOnInitialLoadRef.current = false;
+      return;
+    }
+    if (hasAutoScrolledOnInitialLoadRef.current) return;
+
+    const frame = requestAnimationFrame(() => {
+      scrollToBottom();
+      hasAutoScrolledOnInitialLoadRef.current = true;
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [messages.length, scrollToBottom]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -662,35 +675,29 @@ const ChatScreen = () => {
           </View>
           <LegendList
             data={messages}
+            estimatedItemSize={80}
+            initialScrollIndex={
+              messages.length > 0 ? messages.length - 1 : undefined
+            }
+            keyExtractor={(item) => item.id}
+            maintainScrollAtEnd
+            maintainVisibleContentPosition
+            recycleItems={true}
+            refreshControl={
+              <RefreshControl
+                onRefresh={() => {}}
+                progressViewOffset={40}
+                refreshing={false}
+                tintColor={"#000000"}
+              />
+            }
             ref={listRef}
             renderItem={renderMessageItem}
-            keyExtractor={(item) => item.id}
-            recycleItems
-            estimatedItemSize={90} // baja esto (no 320)
-            initialContainerPoolRatio={5} // sube pool inicial
-            drawDistance={180} // opcional, reduce presión
-            maintainVisibleContentPosition
-            maintainScrollAtEnd
             alignItemsAtEnd
-            // style={{ backgroundColor: "red", flex: 1 }}
             maintainScrollAtEndThreshold={0.2}
             onStartReached={handleLoadMoreMessages}
             onStartReachedThreshold={0.6}
-            ListHeaderComponent={paginationLoader}
           />
-          {/* <LegendList
-            ref={listRef}
-            data={messages}
-            estimatedItemSize={140}
-            alignItemsAtEnd
-            maintainVisibleContentPosition
-            maintainScrollAtEnd
-            renderItem={renderMessageItem}
-            keyExtractor={keyExtractor}
-            onStartReached={handleLoadMoreMessages}
-            onStartReachedThreshold={0.6}
-            ListHeaderComponent={paginationLoader}
-          /> */}
 
           <ChatInput
             value={text}

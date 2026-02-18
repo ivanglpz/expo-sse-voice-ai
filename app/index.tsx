@@ -33,7 +33,6 @@ const Index = () => {
       console.log(error);
     },
   });
-  console.log(query?.data);
 
   if (query?.data?.length === 0) {
     return (
